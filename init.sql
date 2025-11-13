@@ -50,6 +50,6 @@ INSERT INTO "sensor" VALUES (3,'33321U','HJ-1A','HSI',100.0,50.0,30.0,30.0,4.5,'
 INSERT INTO "sensor" VALUES (4,'33320U','HJ-1B','CCD1',30.0,360.0,0.0,0.0,30.0,'#99E6FF',-14.5);
 INSERT INTO "sensor" VALUES (5,'33320U','HJ-1B','CCD2',30.0,360.0,0.0,0.0,30.0,'#8fbc8f',14.5);
 INSERT INTO "sensor" VALUES (6,'33320U','HJ-1B','IRS',300.0,720.0,0.0,0.0,60.0,'#b87333',0.0);
-INSERT INTO "sys_user" VALUES (1,'admin','3597a4ac27cfc07e2d5515497ce871b72730b02c891d888281234db83c39a6aacf210dea','test@test.com');
+INSERT INTO "sys_user" VALUES (1,'admin','$2a$10$6l9rd9MGzWeYog0OggMP4OPi36rSkihsQ.8.6YMrFk8oWuGx1c5bq','test@test.com');
 INSERT INTO "tle_site" VALUES (1,'celestrak_resources','http://celestrak.com/NORAD/elements/resource.txt','celestrak上的资源卫星');
 COMMIT;
