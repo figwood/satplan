@@ -16,6 +16,7 @@ type Satellite struct {
 // Sensor represents a satellite sensor
 type Sensor struct {
 	ID             int     `json:"id"`
+	SatID          int     `json:"sat_id"`
 	SatNoardID     string  `json:"sat_noard_id"`
 	SatName        string  `json:"sat_name"`
 	Name           string  `json:"name"`
@@ -26,6 +27,21 @@ type Sensor struct {
 	ObserveAngle   float64 `json:"observe_angle"`
 	HexColor       string  `json:"hex_color"`
 	InitAngle      float64 `json:"init_angle"`
+}
+
+// TreeNode represents a node in the satellite tree
+type TreeNode struct {
+	ID       int        `json:"id"`
+	Type     string     `json:"type"` // "root", "satellite", "sensor"
+	Name     string     `json:"name"`
+	HexColor string     `json:"hex_color,omitempty"`
+	Children []TreeNode `json:"children,omitempty"`
+}
+
+// SatelliteWithSensors represents a satellite with its sensors
+type SatelliteWithSensors struct {
+	Satellite
+	Sensors []Sensor `json:"sensors"`
 }
 
 // TLE represents Two-Line Element orbital data

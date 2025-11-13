@@ -243,3 +243,91 @@ func DeleteSatellite(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(response)
 	}
 }
+
+// GetSatelliteTree returns a hierarchical tree structure of satellites and sensors
+func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Query all satellites
+		satRows, err := db.Query("SELECT id, noard_id, name, hex_color FROM satellite ORDER BY name")
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to query satellites: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		defer satRows.Close()
+
+		// Build satellite nodes
+		satelliteNodes := []models.TreeNode{}
+		for satRows.Next() {
+			var sat models.Satellite
+			if err := satRows.Scan(&sat.ID, &sat.NoardID, &sat.Name, &sat.HexColor); err != nil {
+				log.Printf("Error scanning satellite: %v", err)
+				continue
+			}
+
+			// Query sensors for this satellite using noard_id
+			sensorRows, err := db.Query(`
+				SELECT s.id, s.name, s.resolution, s.width, s.observe_angle, s.hex_color
+				FROM sensor s
+				WHERE s.sat_noard_id = ?
+				ORDER BY s.name
+			`, sat.NoardID)
+			if err != nil {
+				log.Printf("Error querying sensors for satellite %s: %v", sat.NoardID, err)
+				continue
+			}
+
+			// Build sensor nodes
+			sensorNodes := []models.TreeNode{}
+			for sensorRows.Next() {
+				var sensor models.Sensor
+				if err := sensorRows.Scan(&sensor.ID, &sensor.Name, &sensor.Resolution,
+					&sensor.Width, &sensor.ObserveAngle, &sensor.HexColor); err != nil {
+					log.Printf("Error scanning sensor: %v", err)
+					continue
+				}
+
+				sensorNode := models.TreeNode{
+					ID:       sensor.ID,
+					Type:     "sensor",
+					Name:     sensor.Name,
+					HexColor: sensor.HexColor,
+				}
+				sensorNodes = append(sensorNodes, sensorNode)
+			}
+			sensorRows.Close()
+
+			// Create satellite node with sensors as children
+			satNode := models.TreeNode{
+				ID:       sat.ID,
+				Type:     "satellite",
+				Name:     sat.Name,
+				HexColor: sat.HexColor,
+				Children: sensorNodes,
+			}
+			satelliteNodes = append(satelliteNodes, satNode)
+		}
+
+		// Create root node
+		rootNode := models.TreeNode{
+			ID:       0,
+			Type:     "root",
+			Name:     "Satellites",
+			Children: satelliteNodes,
+		}
+
+		response := models.Response{
+			Success: true,
+			Message: "Satellite tree retrieved successfully",
+			Data:    rootNode,
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}

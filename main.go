@@ -38,6 +38,7 @@ func main() {
 	// Public routes (no authentication required)
 	api.HandleFunc("/health", handlers.HealthCheck(db)).Methods("GET")
 	api.HandleFunc("/login", auth.LoginHandler(db)).Methods("POST")
+	api.HandleFunc("/sat/tree", handlers.GetSatelliteTree(db)).Methods("GET")
 
 	// Protected routes (authentication required)
 	protected := api.PathPrefix("").Subrouter()

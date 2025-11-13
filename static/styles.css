@@ -99,7 +99,26 @@ body {
     user-select: none;
 }
 
+.tree-checkbox {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
 .tree-item:hover {
+    background: var(--light-color);
+}
+
+.tree-item.root-item {
+    font-weight: 600;
+    background: var(--light-color);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 5px;
+}
+
+.tree-item.root-item:hover {
     background: var(--light-color);
 }
 

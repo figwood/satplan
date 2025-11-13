@@ -2,8 +2,7 @@
 const API_BASE = '/api/v1';
 
 // Data storage
-let satellitesData = [];
-let sensorsData = [];
+let treeData = null;
 let map = null;
 
 // Initialize app
@@ -36,26 +35,17 @@ async function loadTreeData() {
     loadingEl.style.display = 'block';
     
     try {
-        // Load satellites and sensors
-        const [satResponse, sensorResponse] = await Promise.all([
-            fetch(`${API_BASE}/satellites`),
-            fetch(`${API_BASE}/sensors`)
-        ]);
-        
-        const satData = await satResponse.json();
-        const sensorData = await sensorResponse.json();
+        const response = await fetch(`${API_BASE}/sat/tree`);
+        const data = await response.json();
         
         loadingEl.style.display = 'none';
         
-        if (satData.success && satData.data) {
-            satellitesData = satData.data;
+        if (data.success && data.data) {
+            treeData = data.data;
+            renderTree();
+        } else {
+            treeEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #EF4444;">Failed to load data</p>';
         }
-        
-        if (sensorData.success && sensorData.data) {
-            sensorsData = sensorData.data;
-        }
-        
-        renderTree();
     } catch (error) {
         loadingEl.style.display = 'none';
         console.error('Error loading tree data:', error);
@@ -67,49 +57,95 @@ async function loadTreeData() {
 function renderTree() {
     const treeEl = document.getElementById('tree');
     
-    if (satellitesData.length === 0) {
-        treeEl.innerHTML = '<p class="loading">No satellites found</p>';
+    if (!treeData) {
+        treeEl.innerHTML = '<p class="loading">No data found</p>';
         return;
     }
     
+    treeEl.innerHTML = renderTreeNode(treeData);
+}
+
+// Render a tree node recursively
+function renderTreeNode(node) {
+    const hasChildren = node.children && node.children.length > 0;
+    const icon = getNodeIcon(node.type);
+    const colorBadge = node.hex_color ? `<span class="tree-color" style="background-color: ${node.hex_color}"></span>` : '';
+    
     let html = '';
     
-    satellitesData.forEach(satellite => {
-        const satelliteSensors = sensorsData.filter(s => s.sat_id === satellite.id);
-        const hasChildren = satelliteSensors.length > 0;
-        
-        html += `
+    if (node.type === 'root') {
+        // Root node is always expanded, no checkbox
+        html = `
             <div class="tree-node">
-                <div class="tree-item" onclick="toggleNode(${satellite.id})" data-sat-id="${satellite.id}">
-                    <span class="tree-toggle ${hasChildren ? 'collapsed' : 'empty'}" id="toggle-${satellite.id}"></span>
-                    <span class="tree-icon">🛰️</span>
-                    <span class="tree-label">${satellite.name}</span>
-                    ${satellite.hex_color ? `<span class="tree-color" style="background-color: ${satellite.hex_color}"></span>` : ''}
+                <div class="tree-item root-item">
+                    <span class="tree-toggle expanded" onclick="toggleNode(event, 'node-${node.id}')"></span>
+                    <span class="tree-icon">${icon}</span>
+                    <span class="tree-label"><strong>${node.name}</strong></span>
                 </div>
-                <div class="tree-children collapsed" id="children-${satellite.id}">
-                    ${satelliteSensors.map(sensor => `
-                        <div class="tree-item" onclick="selectSensor(event, ${sensor.id})" data-sensor-id="${sensor.id}">
-                            <span class="tree-toggle empty"></span>
-                            <span class="tree-icon">📡</span>
-                            <span class="tree-label">${sensor.name}</span>
-                        </div>
-                    `).join('')}
+                <div class="tree-children" id="children-node-${node.id}">
+                    ${hasChildren ? node.children.map(child => renderTreeNode(child)).join('') : ''}
                 </div>
             </div>
         `;
-    });
+    } else if (node.type === 'satellite') {
+        html = `
+            <div class="tree-node">
+                <div class="tree-item" onclick="selectNode(event, ${node.id}, '${node.type}')">
+                    <input type="checkbox" class="tree-checkbox" onclick="handleCheckbox(event, ${node.id}, '${node.type}')" id="check-${node.type}-${node.id}">
+                    <span class="tree-toggle ${hasChildren ? 'collapsed' : 'empty'}" onclick="toggleNode(event, 'node-${node.type}-${node.id}')"></span>
+                    <span class="tree-icon">${icon}</span>
+                    <span class="tree-label">${node.name}</span>
+                    ${colorBadge}
+                </div>
+                ${hasChildren ? `
+                    <div class="tree-children collapsed" id="children-node-${node.type}-${node.id}">
+                        ${node.children.map(child => renderTreeNode(child)).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } else {
+        // Sensor node
+        html = `
+            <div class="tree-node">
+                <div class="tree-item" onclick="selectNode(event, ${node.id}, '${node.type}')">
+                    <input type="checkbox" class="tree-checkbox" onclick="handleCheckbox(event, ${node.id}, '${node.type}')" id="check-${node.type}-${node.id}">
+                    <span class="tree-toggle empty"></span>
+                    <span class="tree-icon">${icon}</span>
+                    <span class="tree-label">${node.name}</span>
+                    ${colorBadge}
+                </div>
+            </div>
+        `;
+    }
     
-    treeEl.innerHTML = html;
+    return html;
+}
+
+// Get icon for node type
+function getNodeIcon(type) {
+    switch (type) {
+        case 'root':
+            return '📁';
+        case 'satellite':
+            return '🛰️';
+        case 'sensor':
+            return '📡';
+        default:
+            return '•';
+    }
 }
 
 // Toggle tree node
-function toggleNode(satelliteId) {
-    const toggleEl = document.getElementById(`toggle-${satelliteId}`);
-    const childrenEl = document.getElementById(`children-${satelliteId}`);
+function toggleNode(event, nodeId) {
+    event.stopPropagation();
     
-    if (!toggleEl || !childrenEl) return;
+    const toggleEl = event.target;
+    const childrenEl = document.getElementById(`children-${nodeId}`);
     
-    if (toggleEl.classList.contains('empty')) return;
+    if (!toggleEl || !childrenEl || toggleEl.classList.contains('empty')) {
+        return;
+    }
     
     if (childrenEl.classList.contains('collapsed')) {
         childrenEl.classList.remove('collapsed');
@@ -122,8 +158,8 @@ function toggleNode(satelliteId) {
     }
 }
 
-// Select sensor
-function selectSensor(event, sensorId) {
+// Select node
+function selectNode(event, nodeId, nodeType) {
     event.stopPropagation();
     
     // Remove previous selection
@@ -134,9 +170,16 @@ function selectSensor(event, sensorId) {
     // Add selection to clicked item
     event.currentTarget.classList.add('selected');
     
-    const sensor = sensorsData.find(s => s.id === sensorId);
-    if (sensor) {
-        console.log('Selected sensor:', sensor);
-        // You can add more functionality here, like showing sensor details on the map
-    }
+    console.log(`Selected ${nodeType}:`, nodeId);
+    // You can add more functionality here, like showing details on the map
+}
+
+// Handle checkbox changes
+function handleCheckbox(event, nodeId, nodeType) {
+    event.stopPropagation();
+    
+    const isChecked = event.target.checked;
+    console.log(`${nodeType} ${nodeId} ${isChecked ? 'checked' : 'unchecked'}`);
+    
+    // You can add more functionality here, like showing/hiding on the map
 }
