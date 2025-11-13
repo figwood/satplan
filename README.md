@@ -28,6 +28,7 @@ satplan/
   
 - **Backend (Go)**
   - RESTful API with Gorilla Mux router
+  - JWT-based authentication for API security
   - SQLite database for data persistence
   - Automatic database initialization from `init.sql`
   - CORS support
@@ -98,18 +99,69 @@ The database will be automatically created from `init.sql` on first run.
 
 All API endpoints are prefixed with `/api/v1/`.
 
-### Health Check
-- `GET /api/v1/health` - Check API health and get statistics
+### Authentication
 
-### Satellites
+The API uses JWT (JSON Web Token) for authentication. Most endpoints require a valid JWT token.
+
+#### Login
+- `POST /api/v1/login` - Authenticate and receive JWT token
+
+**Request Body:**
+```json
+{
+  "username": "admin",
+  "password": "admin"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": 1,
+      "username": "admin",
+      "email": "test@test.com"
+    }
+  }
+}
+```
+
+**Using the Token:**
+
+Include the JWT token in the `Authorization` header for protected endpoints:
+
+```
+Authorization: Bearer <your-token-here>
+```
+
+**Example with curl:**
+```bash
+# Login to get token
+curl -X POST http://localhost:8080/api/v1/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}'
+
+# Use token for protected endpoints
+curl -X GET http://localhost:8080/api/v1/satellites \
+  -H "Authorization: Bearer <your-token-here>"
+```
+
+### Health Check
+- `GET /api/v1/health` - Check API health and get statistics (public, no auth required)
+
+### Satellites (Protected)
 - `GET /api/v1/satellites` - Get all satellites
 - `GET /api/v1/satellites/{id}` - Get satellite by ID
 
-### Sensors
+### Sensors (Protected)
 - `GET /api/v1/sensors` - Get all sensors
 - `GET /api/v1/sensors/{id}` - Get sensor by ID
 
-### TLE Data
+### TLE Data (Protected)
 - `GET /api/v1/tle` - Get recent TLE data (limited to 100)
 - `GET /api/v1/tle/satellite/{norad_id}` - Get TLE data for specific satellite
 
@@ -117,6 +169,8 @@ All API endpoints are prefixed with `/api/v1/`.
 
 - `PORT` - Server port (default: 8080)
 - `DB_PATH` - SQLite database file path (default: satplan.db)
+- `JWT_SECRET` - Secret key for JWT token signing (default: "your-secret-key-change-in-production")
+  - **Important:** Change this in production for security!
 
 ## Architecture
 
