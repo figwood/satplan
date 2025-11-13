@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+satplan
+
+# Old directories (if they still exist)
+backend/
+frontend/
+
+# Data
+data/
+uploads/
+
+# Misc
+.DS_Store
+*.log
+.vscode
+.idea
+*.swp
+*.swo
+
+# Documentation
+README.md
+QUICKSTART.md
+LICENSE

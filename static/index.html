@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatPlan - Satellite Planning System</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛰️ SatPlan</h1>
+            <p>Satellite Mission Planning and Tracking System</p>
+        </div>
+        
+        <div class="controls">
+            <div class="stats-summary">
+                <div class="stat-mini">
+                    <div class="stat-mini-value" id="totalSatellites">-</div>
+                    <div class="stat-mini-label">Satellites</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-value" id="totalSensors">-</div>
+                    <div class="stat-mini-label">Sensors</div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-value" id="totalTLE">-</div>
+                    <div class="stat-mini-label">TLE Records</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('satellites')">Satellites</button>
+            <button class="tab-btn" onclick="switchTab('sensors')">Sensors</button>
+            <button class="tab-btn" onclick="switchTab('tle')">TLE Data</button>
+        </div>
+        
+        <div id="satellites" class="tab-content active">
+            <h2>Satellites</h2>
+            <div id="satellitesLoading" class="loading">Loading satellites...</div>
+            <div id="satellitesTable" class="table-container"></div>
+        </div>
+        
+        <div id="sensors" class="tab-content">
+            <h2>Sensors</h2>
+            <div id="sensorsLoading" class="loading">Loading sensors...</div>
+            <div id="sensorsTable" class="table-container"></div>
+        </div>
+        
+        <div id="tle" class="tab-content">
+            <h2>TLE Data (Latest 100 Records)</h2>
+            <div id="tleLoading" class="loading">Loading TLE data...</div>
+            <div id="tleTable" class="table-container"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
