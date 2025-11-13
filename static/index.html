@@ -19,6 +19,26 @@
         </div>
         
         <div class="map-container">
+            <div class="map-controls">
+                <div class="control-group">
+                    <label for="planningDays">Planning Days:</label>
+                    <select id="planningDays">
+                        <option value="1">1 Day</option>
+                        <option value="2">2 Days</option>
+                        <option value="3" selected>3 Days</option>
+                        <option value="4">4 Days</option>
+                        <option value="5">5 Days</option>
+                        <option value="6">6 Days</option>
+                        <option value="7">7 Days</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <button id="drawAreaBtn" class="control-btn">
+                        <span id="btnIcon">📐</span>
+                        <span id="btnText">Draw Planning Area</span>
+                    </button>
+                </div>
+            </div>
             <div id="map"></div>
         </div>
     </div>

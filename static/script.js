@@ -4,27 +4,132 @@ const API_BASE = '/api/v1';
 // Data storage
 let treeData = null;
 let map = null;
+let drawInteraction = null;
+let vectorSource = null;
+let vectorLayer = null;
+let isDrawing = false;
+let planningDays = 3;
+let planningArea = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
     loadTreeData();
+    initControls();
 });
 
 // Initialize OpenLayers map
 function initMap() {
+    // Create vector source and layer for drawing
+    vectorSource = new ol.source.Vector();
+    vectorLayer = new ol.layer.Vector({
+        source: vectorSource,
+        style: new ol.style.Style({
+            fill: new ol.style.Fill({
+                color: 'rgba(59, 130, 246, 0.2)'
+            }),
+            stroke: new ol.style.Stroke({
+                color: '#3B82F6',
+                width: 2
+            })
+        })
+    });
+
     map = new ol.Map({
         target: 'map',
         layers: [
             new ol.layer.Tile({
                 source: new ol.source.OSM()
-            })
+            }),
+            vectorLayer
         ],
         view: new ol.View({
             center: ol.proj.fromLonLat([0, 0]),
             zoom: 2
         })
     });
+}
+
+// Initialize controls
+function initControls() {
+    // Planning days select
+    const planningDaysSelect = document.getElementById('planningDays');
+    planningDaysSelect.addEventListener('change', function(e) {
+        planningDays = parseInt(e.target.value);
+        console.log('Planning days changed to:', planningDays);
+    });
+
+    // Draw area button
+    const drawAreaBtn = document.getElementById('drawAreaBtn');
+    drawAreaBtn.addEventListener('click', toggleDrawMode);
+}
+
+// Toggle draw mode
+function toggleDrawMode() {
+    const drawAreaBtn = document.getElementById('drawAreaBtn');
+    const btnIcon = document.getElementById('btnIcon');
+    const btnText = document.getElementById('btnText');
+
+    if (!isDrawing) {
+        // Start drawing mode
+        isDrawing = true;
+        drawAreaBtn.classList.add('active');
+        btnIcon.textContent = '✖️';
+        btnText.textContent = 'Cancel Drawing';
+
+        // Clear previous drawings
+        vectorSource.clear();
+
+        // Create DragBox interaction for rectangle drawing
+        drawInteraction = new ol.interaction.DragBox({
+            condition: ol.events.condition.always
+        });
+
+        // Handle box end (when user releases mouse)
+        drawInteraction.on('boxend', function() {
+            const extent = drawInteraction.getGeometry().getExtent();
+            
+            // Create a polygon feature from the extent
+            const feature = new ol.Feature({
+                geometry: new ol.geom.Polygon.fromExtent(extent)
+            });
+            
+            // Clear and add the new feature
+            vectorSource.clear();
+            vectorSource.addFeature(feature);
+            
+            // Convert extent to lon/lat coordinates
+            const bottomLeft = ol.proj.toLonLat([extent[0], extent[1]]);
+            const topRight = ol.proj.toLonLat([extent[2], extent[3]]);
+            
+            planningArea = {
+                minLon: bottomLeft[0],
+                minLat: bottomLeft[1],
+                maxLon: topRight[0],
+                maxLat: topRight[1]
+            };
+
+            console.log('Planning area defined:', planningArea);
+            
+            // Exit drawing mode
+            setTimeout(() => {
+                toggleDrawMode();
+            }, 100);
+        });
+
+        map.addInteraction(drawInteraction);
+    } else {
+        // Stop drawing mode
+        isDrawing = false;
+        drawAreaBtn.classList.remove('active');
+        btnIcon.textContent = '📐';
+        btnText.textContent = 'Draw Planning Area';
+
+        if (drawInteraction) {
+            map.removeInteraction(drawInteraction);
+            drawInteraction = null;
+        }
+    }
 }
 
 // Load tree data
