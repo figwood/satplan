@@ -42,12 +42,26 @@ func main() {
 	// Protected routes (authentication required)
 	protected := api.PathPrefix("").Subrouter()
 	protected.Use(auth.Middleware)
-	protected.HandleFunc("/satellites", handlers.GetSatellites(db)).Methods("GET")
-	protected.HandleFunc("/satellites/{id}", handlers.GetSatelliteByID(db)).Methods("GET")
-	protected.HandleFunc("/sensors", handlers.GetSensors(db)).Methods("GET")
-	protected.HandleFunc("/sensors/{id}", handlers.GetSensorByID(db)).Methods("GET")
-	protected.HandleFunc("/tle", handlers.GetTLEs(db)).Methods("GET")
-	protected.HandleFunc("/tle/satellite/{norad_id}", handlers.GetTLEBySatellite(db)).Methods("GET")
+
+	// Satellite routes
+	protected.HandleFunc("/sat/all", handlers.GetAllSatellites(db)).Methods("GET")
+	protected.HandleFunc("/sat/add", handlers.AddSatellite(db)).Methods("POST")
+	protected.HandleFunc("/sat/{id}", handlers.GetSatelliteById(db)).Methods("GET")
+	protected.HandleFunc("/sat/update/{id}", handlers.UpdateSatellite(db)).Methods("PUT")
+	protected.HandleFunc("/sat/{id}", handlers.DeleteSatellite(db)).Methods("DELETE")
+	protected.HandleFunc("/sat/tle/update", handlers.UpdateTles(db)).Methods("POST")
+
+	// Sensor routes
+	protected.HandleFunc("/sen/all", handlers.GetAllSensors(db)).Methods("GET")
+	protected.HandleFunc("/sen/add", handlers.AddSensor(db)).Methods("POST")
+	protected.HandleFunc("/sen/bysat", handlers.GetSensorBySatId(db)).Methods("GET")
+	protected.HandleFunc("/sen/{id}", handlers.GetSensorById(db)).Methods("GET")
+	protected.HandleFunc("/sen/update/{id}", handlers.UpdateSensor(db)).Methods("PUT")
+	protected.HandleFunc("/sen/{id}", handlers.DeleteSensor(db)).Methods("DELETE")
+
+	// User routes
+	protected.HandleFunc("/user/all", handlers.GetAllUsers(db)).Methods("GET")
+	protected.HandleFunc("/user/me", handlers.GetUserInfo(db)).Methods("GET")
 
 	// Serve static files
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir(staticDir + "/")))
