@@ -151,3 +151,44 @@ func UpdateTles(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(response)
 	}
 }
+
+// DeleteTLE deletes a TLE record by ID
+func DeleteTLE(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		// Check if TLE exists
+		var exists bool
+		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM tle WHERE id = ?)", id).Scan(&exists)
+		if err != nil || !exists {
+			response := models.Response{
+				Success: false,
+				Message: "TLE not found",
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM tle WHERE id = ?", id)
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to delete TLE: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := models.Response{
+			Success: true,
+			Message: "TLE deleted successfully",
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}

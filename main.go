@@ -49,6 +49,11 @@ func main() {
 	protected.HandleFunc("/sat/{id}", handlers.GetSatelliteById(db)).Methods("GET")
 	protected.HandleFunc("/sat/update/{id}", handlers.UpdateSatellite(db)).Methods("PUT")
 	protected.HandleFunc("/sat/{id}", handlers.DeleteSatellite(db)).Methods("DELETE")
+
+	// TLE routes
+	protected.HandleFunc("/tle/all", handlers.GetTLEs(db)).Methods("GET")
+	protected.HandleFunc("/tle/sat/{norad_id}", handlers.GetTLEBySatellite(db)).Methods("GET")
+	protected.HandleFunc("/tle/{id}", handlers.DeleteTLE(db)).Methods("DELETE")
 	protected.HandleFunc("/sat/tle/update", handlers.UpdateTles(db)).Methods("POST")
 
 	// Sensor routes
@@ -62,6 +67,11 @@ func main() {
 	// User routes
 	protected.HandleFunc("/user/all", handlers.GetAllUsers(db)).Methods("GET")
 	protected.HandleFunc("/user/me", handlers.GetUserInfo(db)).Methods("GET")
+
+	// Admin page route
+	r.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, staticDir+"/admin.html")
+	}).Methods("GET")
 
 	// Serve static files
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir(staticDir + "/")))
