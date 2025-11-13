@@ -107,6 +107,20 @@ body {
     flex-shrink: 0;
 }
 
+.tree-checkbox.half-checked {
+    opacity: 0.6;
+}
+
+.tree-checkbox.half-checked::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 2px;
+    background-color: currentColor;
+    margin-left: -12px;
+    margin-top: 7px;
+}
+
 .tree-item:hover {
     background: var(--light-color);
 }

@@ -181,5 +181,66 @@ function handleCheckbox(event, nodeId, nodeType) {
     const isChecked = event.target.checked;
     console.log(`${nodeType} ${nodeId} ${isChecked ? 'checked' : 'unchecked'}`);
     
+    // If it's a satellite, check/uncheck all its sensors
+    if (nodeType === 'satellite') {
+        const childrenContainer = document.getElementById(`children-node-${nodeType}-${nodeId}`);
+        if (childrenContainer) {
+            const sensorCheckboxes = childrenContainer.querySelectorAll('.tree-checkbox');
+            sensorCheckboxes.forEach(checkbox => {
+                checkbox.checked = isChecked;
+            });
+        }
+        // Remove half-checked state when manually checking/unchecking
+        event.target.classList.remove('half-checked');
+    }
+    
+    // If it's a sensor, update the parent satellite's state
+    if (nodeType === 'sensor') {
+        updateParentSatelliteState(nodeId);
+    }
+    
     // You can add more functionality here, like showing/hiding on the map
+}
+
+// Update the parent satellite's checkbox state based on its sensors
+function updateParentSatelliteState(sensorId) {
+    // Find the satellite node that contains this sensor
+    const sensorCheckbox = document.getElementById(`check-sensor-${sensorId}`);
+    if (!sensorCheckbox) return;
+    
+    // Find the parent tree-children container
+    const childrenContainer = sensorCheckbox.closest('.tree-children');
+    if (!childrenContainer) return;
+    
+    // Get the satellite ID from the children container's ID
+    const containerId = childrenContainer.id; // e.g., "children-node-satellite-1"
+    const satelliteId = containerId.match(/children-node-satellite-(\d+)/)?.[1];
+    if (!satelliteId) return;
+    
+    // Get the satellite checkbox
+    const satelliteCheckbox = document.getElementById(`check-satellite-${satelliteId}`);
+    if (!satelliteCheckbox) return;
+    
+    // Get all sensor checkboxes in this satellite
+    const sensorCheckboxes = Array.from(childrenContainer.querySelectorAll('.tree-checkbox'));
+    const checkedCount = sensorCheckboxes.filter(cb => cb.checked).length;
+    const totalCount = sensorCheckboxes.length;
+    
+    // Update satellite checkbox state
+    if (checkedCount === 0) {
+        // No sensors checked
+        satelliteCheckbox.checked = false;
+        satelliteCheckbox.classList.remove('half-checked');
+        satelliteCheckbox.indeterminate = false;
+    } else if (checkedCount === totalCount) {
+        // All sensors checked
+        satelliteCheckbox.checked = true;
+        satelliteCheckbox.classList.remove('half-checked');
+        satelliteCheckbox.indeterminate = false;
+    } else {
+        // Some sensors checked (half-checked state)
+        satelliteCheckbox.checked = false;
+        satelliteCheckbox.classList.add('half-checked');
+        satelliteCheckbox.indeterminate = true;
+    }
 }
