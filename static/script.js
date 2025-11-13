@@ -69,7 +69,6 @@ function renderTree() {
 function renderTreeNode(node) {
     const hasChildren = node.children && node.children.length > 0;
     const icon = getNodeIcon(node.type);
-    const colorBadge = node.hex_color ? `<span class="tree-color" style="background-color: ${node.hex_color}"></span>` : '';
     
     let html = '';
     
@@ -95,7 +94,6 @@ function renderTreeNode(node) {
                     <span class="tree-toggle ${hasChildren ? 'collapsed' : 'empty'}" onclick="toggleNode(event, 'node-${node.type}-${node.id}')"></span>
                     <span class="tree-icon">${icon}</span>
                     <span class="tree-label">${node.name}</span>
-                    ${colorBadge}
                 </div>
                 ${hasChildren ? `
                     <div class="tree-children collapsed" id="children-node-${node.type}-${node.id}">
@@ -106,6 +104,7 @@ function renderTreeNode(node) {
         `;
     } else {
         // Sensor node
+        const colorBadge = node.hex_color ? `<span class="tree-color" style="background-color: ${node.hex_color}"></span>` : '';
         html = `
             <div class="tree-node">
                 <div class="tree-item" onclick="selectNode(event, ${node.id}, '${node.type}')">
