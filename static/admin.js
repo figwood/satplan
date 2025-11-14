@@ -401,7 +401,7 @@ async function loadTLEs() {
             content.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">📊</div>
-                    <p>No TLE data found. Add your first TLE record!</p>
+                    <p>No TLE data found. Update TLE data for your satellites!</p>
                 </div>
             `;
             return;
@@ -450,22 +450,14 @@ async function loadTLEs() {
     }
 }
 
-function openAddTLEModal() {
-    currentEditId = null;
-    document.getElementById('tleModalTitle').textContent = 'Add TLE';
-    document.getElementById('tleForm').reset();
-    document.getElementById('tleModalError').innerHTML = '';
-    
-    // Set current timestamp
-    const currentTime = Math.floor(Date.now() / 1000);
-    document.getElementById('tleTime').value = currentTime;
-    document.getElementById('currentTimestamp').textContent = currentTime;
-    
-    document.getElementById('tleModal').classList.add('active');
+function openBulkTLEModal() {
+    document.getElementById('bulkTLEForm').reset();
+    document.getElementById('bulkTLEModalError').innerHTML = '';
+    document.getElementById('bulkTLEModal').classList.add('active');
 }
 
-function closeTLEModal() {
-    document.getElementById('tleModal').classList.remove('active');
+function closeBulkTLEModal() {
+    document.getElementById('bulkTLEModal').classList.remove('active');
 }
 
 async function deleteTLE(id, noradId) {
@@ -481,39 +473,90 @@ async function deleteTLE(id, noradId) {
     }
 }
 
-document.getElementById('tleForm').addEventListener('submit', async (e) => {
+// Parse TLE text in 3-line format (name, line1, line2)
+function parseTLEText(text) {
+    const lines = text.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    const tles = [];
+    
+    for (let i = 0; i < lines.length; i += 3) {
+        if (i + 2 >= lines.length) {
+            break; // Not enough lines for a complete TLE
+        }
+        
+        const name = lines[i];
+        const line1 = lines[i + 1];
+        const line2 = lines[i + 2];
+        
+        // Validate TLE format - lines should start with "1 " and "2 "
+        if (!line1.startsWith('1 ') || !line2.startsWith('2 ')) {
+            throw new Error(`Invalid TLE format at line ${i + 1}. Expected lines starting with "1 " and "2 ".`);
+        }
+        
+        // Extract NORAD ID from line 1 (columns 3-7)
+        const noradId = line1.substring(2, 7).trim();
+        
+        if (!noradId) {
+            throw new Error(`Could not extract NORAD ID from TLE at line ${i + 2}.`);
+        }
+        
+        tles.push({
+            sat_noard_id: noradId,
+            time: Math.floor(Date.now() / 1000),
+            line1: line1,
+            line2: line2
+        });
+    }
+    
+    return tles;
+}
+
+// Show toast notification
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+document.getElementById('bulkTLEForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const errorDiv = document.getElementById('tleModalError');
+    const errorDiv = document.getElementById('bulkTLEModalError');
     errorDiv.innerHTML = '';
 
-    const tleData = [{
-        sat_noard_id: document.getElementById('tleSatNoardID').value,
-        time: parseInt(document.getElementById('tleTime').value),
-        line1: document.getElementById('tleLine1').value,
-        line2: document.getElementById('tleLine2').value
-    }];
+    const tleText = document.getElementById('bulkTLEText').value;
 
     try {
-        await apiCall('/sat/tle/update', {
+        // Parse the TLE text
+        const tleData = parseTLEText(tleText);
+        
+        if (tleData.length === 0) {
+            throw new Error('No valid TLE data found. Please check the format.');
+        }
+
+        // Send to backend
+        const response = await apiCall('/sat/tle/update', {
             method: 'POST',
             body: JSON.stringify(tleData)
         });
 
-        closeTLEModal();
-        alert('TLE added successfully!');
+        closeBulkTLEModal();
+        
+        let message = `Updated ${response.data.inserted} TLE record(s)`;
+        if (response.data.skipped > 0) {
+            message += ` (${response.data.skipped} skipped)`;
+        }
+        
+        showToast(message, 'success');
         loadTLEs();
     } catch (error) {
         errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
     }
 });
-
-// Update current timestamp every second for TLE modal
-setInterval(() => {
-    const timestampElement = document.getElementById('currentTimestamp');
-    if (timestampElement) {
-        timestampElement.textContent = Math.floor(Date.now() / 1000);
-    }
-}, 1000);
 
 // Close modals when clicking outside
 document.querySelectorAll('.modal').forEach(modal => {

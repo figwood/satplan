@@ -89,6 +89,7 @@ func GetTLEBySatellite(db *sql.DB) http.HandlerFunc {
 }
 
 // UpdateTles updates TLE data (batch update from external source)
+// Only updates TLEs for satellites that exist in the satellite table
 func UpdateTles(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -98,6 +99,16 @@ func UpdateTles(db *sql.DB) http.HandlerFunc {
 			response := models.Response{
 				Success: false,
 				Message: "Invalid request body: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if len(tles) == 0 {
+			response := models.Response{
+				Success: false,
+				Message: "No TLE data provided",
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response)
@@ -117,16 +128,51 @@ func UpdateTles(db *sql.DB) http.HandlerFunc {
 		}
 		defer tx.Rollback()
 
-		// Insert TLEs
+		// Insert TLEs only for satellites that exist in the satellite table
 		inserted := 0
+		skipped := 0
+		notFound := []string{}
+
 		for _, tle := range tles {
-			_, err := tx.Exec("INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)",
+			// Check if satellite exists in satellite table
+			var exists bool
+			err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM satellite WHERE noard_id = ?)", tle.SatNoardID).Scan(&exists)
+			if err != nil {
+				log.Printf("Failed to check satellite existence for %s: %v", tle.SatNoardID, err)
+				skipped++
+				continue
+			}
+
+			if !exists {
+				log.Printf("Satellite with NORAD ID %s not found in satellite table, skipping", tle.SatNoardID)
+				notFound = append(notFound, tle.SatNoardID)
+				skipped++
+				continue
+			}
+
+			// Insert TLE for existing satellite
+			_, err = tx.Exec("INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)",
 				tle.SatNoardID, tle.Time, tle.Line1, tle.Line2)
 			if err != nil {
 				log.Printf("Failed to insert TLE for satellite %s: %v", tle.SatNoardID, err)
+				skipped++
 				continue
 			}
 			inserted++
+		}
+
+		if inserted == 0 {
+			message := fmt.Sprintf("Failed to insert any TLE records. All %d records were skipped.", skipped)
+			if len(notFound) > 0 {
+				message += fmt.Sprintf(" Satellites not found: %v", notFound)
+			}
+			response := models.Response{
+				Success: false,
+				Message: message,
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -139,13 +185,24 @@ func UpdateTles(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		message := fmt.Sprintf("Successfully updated %d TLE record(s)", inserted)
+		if skipped > 0 {
+			message += fmt.Sprintf(" (%d skipped)", skipped)
+		}
+
+		responseData := map[string]interface{}{
+			"inserted": inserted,
+			"skipped":  skipped,
+			"total":    len(tles),
+		}
+		if len(notFound) > 0 {
+			responseData["not_found"] = notFound
+		}
+
 		response := models.Response{
 			Success: true,
-			Message: fmt.Sprintf("Successfully updated %d TLEs", inserted),
-			Data: map[string]interface{}{
-				"inserted": inserted,
-				"total":    len(tles),
-			},
+			Message: message,
+			Data:    responseData,
 		}
 
 		json.NewEncoder(w).Encode(response)

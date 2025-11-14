@@ -301,6 +301,50 @@
             font-size: 48px;
             margin-bottom: 16px;
         }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #2d3748;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+            max-width: 400px;
+        }
+
+        .toast.success {
+            background: #48bb78;
+        }
+
+        .toast.error {
+            background: #f56565;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -358,7 +402,7 @@
         <div id="tle" class="tab-content">
             <div class="action-bar">
                 <h2>TLE Data</h2>
-                <button class="btn btn-primary" onclick="openAddTLEModal()">+ Add TLE</button>
+                <button class="btn btn-primary" onclick="openBulkTLEModal()">Update TLE</button>
             </div>
             <div id="tleLoading" class="loading">Loading TLE data...</div>
             <div id="tleContent"></div>
@@ -450,36 +494,29 @@
         </div>
     </div>
 
-    <!-- TLE Modal -->
-    <div id="tleModal" class="modal">
-        <div class="modal-content">
+    <!-- Bulk TLE Update Modal -->
+    <div id="bulkTLEModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
-                <h2 id="tleModalTitle">Add TLE</h2>
+                <h2>Update TLE Data</h2>
+                <p style="color: #718096; font-size: 14px; margin-top: 8px;">Paste TLE data in standard 3-line format (Name, Line 1, Line 2)</p>
             </div>
-            <div id="tleModalError"></div>
-            <form id="tleForm">
+            <div id="bulkTLEModalError"></div>
+            <form id="bulkTLEForm">
                 <div class="form-group">
-                    <label for="tleSatNoardID">Satellite NORAD ID *</label>
-                    <input type="text" id="tleSatNoardID" required>
-                </div>
-                <div class="form-group">
-                    <label for="tleTime">Time (Unix timestamp) *</label>
-                    <input type="number" id="tleTime" required>
-                    <small>Current time: <span id="currentTimestamp"></span></small>
-                </div>
-                <div class="form-group">
-                    <label for="tleLine1">Line 1 *</label>
-                    <textarea id="tleLine1" rows="2" required></textarea>
-                    <small>First line of TLE data</small>
-                </div>
-                <div class="form-group">
-                    <label for="tleLine2">Line 2 *</label>
-                    <textarea id="tleLine2" rows="2" required></textarea>
-                    <small>Second line of TLE data</small>
+                    <label for="bulkTLEText">TLE Data *</label>
+                    <textarea id="bulkTLEText" rows="20" required placeholder="Example:
+ISS (ZARYA)
+1 25544U 98067A   23001.00000000  .00016717  00000-0  10270-3 0  9005
+2 25544  51.6461 123.4567   0.0007890  45.6789 123.4567 15.54012345678901
+HUBBLE
+1 20580U 90037B   23001.00000000  .00000000  00000-0  00000-0 0  9992
+2 20580  28.4690 123.4567   0.0002000  12.3456 347.6543 15.09876543210987" style="font-family: monospace; font-size: 12px;"></textarea>
+                    <small>Paste TLE data with satellite names. Each satellite requires 3 lines: name, line 1, and line 2.</small>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeTLEModal()">Cancel</button>
-                    <button type="submit" class="btn btn-success">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeBulkTLEModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Update TLEs</button>
                 </div>
             </form>
         </div>
