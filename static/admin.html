@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatPlan Admin - Manage Satellites, Sensors & TLE</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-btn:hover {
+            color: #667eea;
+        }
+
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #38a169;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+
+        .btn-secondary {
+            background: #718096;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #4a5568;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+            margin: 0 2px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f7fafc;
+            color: #2d3748;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #f7fafc;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #2d3748;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group small {
+            color: #718096;
+            font-size: 12px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 30px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .success {
+            background: #c6f6d5;
+            color: #22543d;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .color-preview {
+            display: inline-block;
+            width: 30px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-container h2 {
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #718096;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #2d3748;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+            max-width: 400px;
+        }
+
+        .toast.success {
+            background: #48bb78;
+        }
+
+        .toast.error {
+            background: #f56565;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Form -->
+    <div id="loginContainer" class="login-container">
+        <h2>🛰️ Admin Login</h2>
+        <div id="loginError"></div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+        </form>
+    </div>
+
+    <!-- Main Admin Panel -->
+    <div id="adminPanel" class="container" style="display: none;">
+        <div class="header">
+            <h1>🛰️ SatPlan Admin</h1>
+            <p>Manage Satellites, Sensors & TLE Data</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('satellites')">Satellites</button>
+            <button class="tab-btn" onclick="switchTab('sensors')">Sensors</button>
+            <button class="tab-btn" onclick="switchTab('tle')">TLE Data</button>
+        </div>
+
+        <!-- Satellites Tab -->
+        <div id="satellites" class="tab-content active">
+            <div class="action-bar">
+                <h2>Satellites</h2>
+                <button class="btn btn-primary" onclick="openAddSatelliteModal()">+ Add Satellite</button>
+            </div>
+            <div id="satellitesLoading" class="loading">Loading satellites...</div>
+            <div id="satellitesContent"></div>
+        </div>
+
+        <!-- Sensors Tab -->
+        <div id="sensors" class="tab-content">
+            <div class="action-bar">
+                <h2>Sensors</h2>
+                <button class="btn btn-primary" onclick="openAddSensorModal()">+ Add Sensor</button>
+            </div>
+            <div id="sensorsLoading" class="loading">Loading sensors...</div>
+            <div id="sensorsContent"></div>
+        </div>
+
+        <!-- TLE Tab -->
+        <div id="tle" class="tab-content">
+            <div class="action-bar">
+                <h2>TLE Data</h2>
+                <button class="btn btn-primary" onclick="openBulkTLEModal()">Update TLE</button>
+            </div>
+            <div id="tleLoading" class="loading">Loading TLE data...</div>
+            <div id="tleContent"></div>
+        </div>
+    </div>
+
+    <!-- Satellite Modal -->
+    <div id="satelliteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="satelliteModalTitle">Add Satellite</h2>
+            </div>
+            <div id="satelliteModalError"></div>
+            <form id="satelliteForm">
+                <div class="form-group">
+                    <label for="satNoardID">NORAD ID *</label>
+                    <input type="text" id="satNoardID" required>
+                    <small>Unique NORAD identifier for the satellite</small>
+                </div>
+                <div class="form-group">
+                    <label for="satName">Name *</label>
+                    <input type="text" id="satName" required>
+                </div>
+                <div class="form-group">
+                    <label for="satHexColor">Color</label>
+                    <input type="color" id="satHexColor" value="#667eea">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeSatelliteModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Sensor Modal -->
+    <div id="sensorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="sensorModalTitle">Add Sensor</h2>
+            </div>
+            <div id="sensorModalError"></div>
+            <form id="sensorForm">
+                <div class="form-group">
+                    <label for="senSatNoardID">Satellite NORAD ID *</label>
+                    <input type="text" id="senSatNoardID" required>
+                </div>
+                <div class="form-group">
+                    <label for="senSatName">Satellite Name</label>
+                    <input type="text" id="senSatName">
+                </div>
+                <div class="form-group">
+                    <label for="senName">Sensor Name *</label>
+                    <input type="text" id="senName" required>
+                </div>
+                <div class="form-group">
+                    <label for="senResolution">Resolution (meters)</label>
+                    <input type="number" step="0.01" id="senResolution" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senWidth">Width (km)</label>
+                    <input type="number" step="0.01" id="senWidth" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senRightSideAngle">Right Side Angle (degrees)</label>
+                    <input type="number" step="0.01" id="senRightSideAngle" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senLeftSideAngle">Left Side Angle (degrees)</label>
+                    <input type="number" step="0.01" id="senLeftSideAngle" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senObserveAngle">Observe Angle (degrees)</label>
+                    <input type="number" step="0.01" id="senObserveAngle" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senInitAngle">Initial Angle (degrees)</label>
+                    <input type="number" step="0.01" id="senInitAngle" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="senHexColor">Color</label>
+                    <input type="color" id="senHexColor" value="#48bb78">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeSensorModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bulk TLE Update Modal -->
+    <div id="bulkTLEModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Update TLE Data</h2>
+                <p style="color: #718096; font-size: 14px; margin-top: 8px;">Paste TLE data in standard 3-line format (Name, Line 1, Line 2)</p>
+            </div>
+            <div id="bulkTLEModalError"></div>
+            <form id="bulkTLEForm">
+                <div class="form-group">
+                    <label for="bulkTLEText">TLE Data *</label>
+                    <textarea id="bulkTLEText" rows="20" required placeholder="Example:
+ISS (ZARYA)
+1 25544U 98067A   23001.00000000  .00016717  00000-0  10270-3 0  9005
+2 25544  51.6461 123.4567   0.0007890  45.6789 123.4567 15.54012345678901
+HUBBLE
+1 20580U 90037B   23001.00000000  .00000000  00000-0  00000-0 0  9992
+2 20580  28.4690 123.4567   0.0002000  12.3456 347.6543 15.09876543210987" style="font-family: monospace; font-size: 12px;"></textarea>
+                    <small>Paste TLE data with satellite names. Each satellite requires 3 lines: name, line 1, and line 2.</small>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeBulkTLEModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Update TLEs</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
