@@ -74,7 +74,19 @@ function initMap() {
         const coordinate = ol.proj.toLonLat(evt.coordinate);
         const lon = coordinate[0].toFixed(3);
         const lat = coordinate[1].toFixed(3);
-        document.getElementById('coordinateLabel').textContent = `${lon}, ${lat}`;
+        const coordText = `${lon}, ${lat}`;
+        
+        // Update map coordinate label (always visible on map)
+        const mapLabel = document.getElementById('mapCoordinateLabel');
+        if (mapLabel) {
+            mapLabel.textContent = coordText;
+        }
+        
+        // Update table coordinate label (if results are showing)
+        const tableLabel = document.getElementById('tableCoordinateLabel');
+        if (tableLabel) {
+            tableLabel.textContent = coordText;
+        }
     });
 }
 
@@ -428,6 +440,9 @@ function clearMap() {
     // Reset planning area
     planningArea = null;
     
+    // Hide results table
+    hideResultsTable();
+    
     console.log('Map cleared');
 }
 
@@ -554,6 +569,9 @@ async function callSensorInRegion(area) {
         // Display regions on map
         displayRegionsOnMap(allRegions);
         
+        // Display results in table
+        displayResultsTable(allRegions, checkedSensors);
+        
     } catch (error) {
         console.error('Error calling SensorInRegion:', error);
     }
@@ -674,4 +692,147 @@ function hexToRgba(hex, alpha) {
     const g = parseInt(hex.slice(3, 5), 16);
     const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Helper function to format date to YYYY-MM-DD HH:mm:ss
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+// Display results in table
+function displayResultsTable(regions, sensors) {
+    const resultsContainer = document.getElementById('resultsContainer');
+    const resultsTableBody = document.getElementById('resultsTableBody');
+    
+    if (!regions || regions.length === 0) {
+        resultsContainer.style.display = 'none';
+        return;
+    }
+    
+    // Create a map of sensor ID to sensor data for quick lookup
+    const sensorMap = {};
+    sensors.forEach(sensor => {
+        sensorMap[sensor.id] = sensor;
+    });
+    
+    // Clear existing table rows
+    resultsTableBody.innerHTML = '';
+    
+    // Sort regions by start time
+    const sortedRegions = [...regions].sort((a, b) => a.startTimestamp - b.startTimestamp);
+    
+    // Add rows for each region
+    sortedRegions.forEach((region, index) => {
+        const sensor = sensorMap[region.sensorId];
+        const row = document.createElement('tr');
+        
+        // Format timestamps to YYYY-MM-DD HH:mm:ss
+        const startTime = formatDateTime(new Date(region.startTimestamp * 1000));
+        const stopTime = formatDateTime(new Date(region.endTimestamp * 1000));
+        
+        // Get sensor name and resolution
+        const sensorName = sensor ? sensor.name : region.sensorId;
+        const resolution = sensor ? (sensor.resolution || 'N/A') : 'N/A';
+        
+        row.innerHTML = `
+            <td>${region.satName}</td>
+            <td>${sensorName}</td>
+            <td>${resolution}</td>
+            <td>${startTime}</td>
+            <td>${stopTime}</td>
+        `;
+        
+        // Store region data on the row for later access
+        row.dataset.regionIndex = index;
+        
+        // Add click handler
+        row.addEventListener('click', function() {
+            highlightRegion(region, row);
+        });
+        
+        resultsTableBody.appendChild(row);
+    });
+    
+    // Show the results container
+    resultsContainer.style.display = 'flex';
+    
+    // Hide the map coordinate label and show table coordinate label
+    const mapCoordLabel = document.getElementById('mapCoordinateLabel');
+    if (mapCoordLabel) {
+        mapCoordLabel.style.display = 'none';
+    }
+    const tableCoordLabel = document.getElementById('tableCoordinateLabel');
+    if (tableCoordLabel) {
+        tableCoordLabel.style.display = 'block';
+    }
+}
+
+// Hide results table
+function hideResultsTable() {
+    const resultsContainer = document.getElementById('resultsContainer');
+    resultsContainer.style.display = 'none';
+    
+    // Show the map coordinate label and hide table coordinate label
+    const mapCoordLabel = document.getElementById('mapCoordinateLabel');
+    if (mapCoordLabel) {
+        mapCoordLabel.style.display = 'block';
+    }
+    const tableCoordLabel = document.getElementById('tableCoordinateLabel');
+    if (tableCoordLabel) {
+        tableCoordLabel.style.display = 'none';
+    }
+}
+
+// Highlight a region on both table and map
+function highlightRegion(region, clickedRow) {
+    // Remove previous highlights from table rows
+    const allRows = document.querySelectorAll('#resultsTableBody tr');
+    allRows.forEach(row => row.classList.remove('highlighted'));
+    
+    // Highlight the clicked row
+    clickedRow.classList.add('highlighted');
+    
+    // Reset all features to normal style
+    vectorSource.getFeatures().forEach(feature => {
+        const featureRegion = feature.get('regionData');
+        if (featureRegion) {
+            const color = featureRegion.color || '#ffcc33';
+            feature.setStyle(new ol.style.Style({
+                fill: new ol.style.Fill({
+                    color: hexToRgba(color, 0.3)
+                }),
+                stroke: new ol.style.Stroke({
+                    color: color,
+                    width: 2
+                })
+            }));
+        }
+    });
+    
+    // Find and highlight the corresponding map feature
+    vectorSource.getFeatures().forEach(feature => {
+        const featureRegion = feature.get('regionData');
+        if (featureRegion && 
+            featureRegion.satId === region.satId && 
+            featureRegion.sensorId === region.sensorId &&
+            featureRegion.startTimestamp === region.startTimestamp) {
+            
+            const color = region.color || '#ffcc33';
+            feature.setStyle(new ol.style.Style({
+                fill: new ol.style.Fill({
+                    color: hexToRgba(color, 0.7)
+                }),
+                stroke: new ol.style.Stroke({
+                    color: '#FF0000',
+                    width: 5
+                })
+            }));
+        }
+    });
 }

@@ -43,6 +43,7 @@ type TreeNode struct {
 	// Sensor-specific fields
 	SatNoardID    string  `json:"sat_noard_id,omitempty"`
 	SatName       string  `json:"sat_name,omitempty"`
+	Resolution    float64 `json:"resolution,omitempty"`
 	InitAngle     float64 `json:"init_angle,omitempty"`
 	LeftSideAngle float64 `json:"left_side_angle,omitempty"`
 	CurSideAngle  float64 `json:"cur_side_angle,omitempty"`

@@ -190,7 +190,67 @@ body {
 .map-container {
     flex: 1;
     position: relative;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
+}
+
+.results-container {
+    background: white;
+    border-top: 2px solid var(--border-color);
+    max-height: 300px;
+    display: flex;
+    flex-direction: column;
+}
+
+.results-table-wrapper {
+    overflow: auto;
+    flex: 1;
+    background: white;
+}
+
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.results-table thead {
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 1;
+}
+
+.results-table th {
+    text-align: left;
+    padding: 10px 15px;
+    font-weight: 600;
+    color: var(--dark-color);
+    border-bottom: 2px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.results-table td {
+    padding: 10px 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.results-table tbody tr {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.results-table tbody tr:hover {
+    background: var(--light-color);
+}
+
+.results-table tbody tr.highlighted {
+    background: rgba(59, 130, 246, 0.2);
+}
+
+.results-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 .map-controls {
@@ -299,6 +359,22 @@ body {
     bottom: 10px;
     left: 10px;
     z-index: 1000;
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    box-shadow: none;
+    pointer-events: none;
+    border: none;
+}
+
+.coordinate-label-over-table {
+    position: absolute;
+    bottom: 310px;
+    left: 10px;
+    z-index: 1001;
     background: transparent;
     padding: 6px 12px;
     border-radius: 4px;

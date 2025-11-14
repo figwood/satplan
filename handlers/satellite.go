@@ -284,7 +284,7 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 
 			// Query sensors for this satellite using noard_id
 			sensorRows, err := db.Query(`
-				SELECT s.id, s.sat_noard_id, s.sat_name, s.name, s.init_angle, 
+				SELECT s.id, s.sat_noard_id, s.sat_name, s.name, s.resolution, s.init_angle, 
 				       s.left_side_angle, s.observe_angle, s.hex_color
 				FROM sensor s
 				WHERE s.sat_noard_id = ?
@@ -300,9 +300,9 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 			for sensorRows.Next() {
 				var sensorID int
 				var satNoardID, satName, sensorName, hexColor string
-				var initAngle, leftSideAngle, observeAngle float64
+				var resolution, initAngle, leftSideAngle, observeAngle float64
 				if err := sensorRows.Scan(&sensorID, &satNoardID, &satName, &sensorName,
-					&initAngle, &leftSideAngle, &observeAngle, &hexColor); err != nil {
+					&resolution, &initAngle, &leftSideAngle, &observeAngle, &hexColor); err != nil {
 					log.Printf("Error scanning sensor: %v", err)
 					continue
 				}
@@ -314,6 +314,7 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 					HexColor:      hexColor,
 					SatNoardID:    satNoardID,
 					SatName:       satName,
+					Resolution:    resolution,
 					InitAngle:     initAngle,
 					LeftSideAngle: leftSideAngle,
 					CurSideAngle:  leftSideAngle,

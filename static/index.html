@@ -52,8 +52,26 @@
                     </button>
                 </div>
             </div>
-            <div id="coordinateLabel" class="coordinate-label">0.00, 0.00</div>
+            <div id="mapCoordinateLabel" class="coordinate-label">0.00, 0.00</div>
+            <div id="tableCoordinateLabel" class="coordinate-label-over-table" style="display: none;">0.00, 0.00</div>
             <div id="map"></div>
+            <div id="resultsContainer" class="results-container" style="display: none;">
+                <div class="results-table-wrapper">
+                    <table id="resultsTable" class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Satellite</th>
+                                <th>Sensor</th>
+                                <th>Resolution (m)</th>
+                                <th>Start Time</th>
+                                <th>Stop Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
