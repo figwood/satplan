@@ -93,6 +93,12 @@ type LoginResponse struct {
 	User  User   `json:"user"`
 }
 
+// ChangePasswordRequest contains old and new password for password change
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 // Claims represents JWT token claims
 type Claims struct {
 	UserID   int    `json:"user_id"`

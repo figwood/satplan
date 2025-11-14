@@ -67,6 +67,11 @@ function switchTab(tabName) {
     
     event.target.classList.add('active');
     document.getElementById(tabName).classList.add('active');
+    
+    // Load data when switching to account tab
+    if (tabName === 'account') {
+        loadUserInfo();
+    }
 }
 
 // Load all data
@@ -589,4 +594,81 @@ document.querySelectorAll('.modal').forEach(modal => {
             modal.classList.remove('active');
         }
     });
+});
+
+// ==================== ACCOUNT ====================
+
+async function loadUserInfo() {
+    const content = document.getElementById('userInfoContent');
+    
+    content.innerHTML = '<div class="loading">Loading user information...</div>';
+
+    try {
+        const response = await apiCall('/user/me');
+        const user = response.data;
+
+        content.innerHTML = `
+            <div style="padding: 20px;">
+                <div style="margin-bottom: 15px;">
+                    <strong>Username:</strong> ${user.username}
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <strong>Email:</strong> ${user.email || 'Not set'}
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <strong>User ID:</strong> ${user.id}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="error" style="margin: 20px;">${error.message}</div>`;
+    }
+}
+
+function openChangePasswordModal() {
+    document.getElementById('changePasswordModal').classList.add('active');
+    document.getElementById('changePasswordForm').reset();
+    document.getElementById('changePasswordModalError').innerHTML = '';
+}
+
+function closeChangePasswordModal() {
+    document.getElementById('changePasswordModal').classList.remove('active');
+}
+
+// Handle change password form submission
+document.getElementById('changePasswordForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorDiv = document.getElementById('changePasswordModalError');
+    errorDiv.innerHTML = '';
+
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    // Validate passwords match
+    if (newPassword !== confirmPassword) {
+        errorDiv.innerHTML = '<div class="error">New passwords do not match</div>';
+        return;
+    }
+
+    // Validate password length
+    if (newPassword.length < 6) {
+        errorDiv.innerHTML = '<div class="error">Password must be at least 6 characters long</div>';
+        return;
+    }
+
+    try {
+        const response = await apiCall('/user/password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+
+        closeChangePasswordModal();
+        showToast('Password changed successfully', 'success');
+    } catch (error) {
+        errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
+    }
 });

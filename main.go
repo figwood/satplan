@@ -71,6 +71,7 @@ func main() {
 	// User routes
 	protected.HandleFunc("/user/all", handlers.GetAllUsers(db)).Methods("GET")
 	protected.HandleFunc("/user/me", handlers.GetUserInfo(db)).Methods("GET")
+	protected.HandleFunc("/user/password", handlers.UpdateUserPassword(db)).Methods("PUT")
 
 	// Admin page route
 	r.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
