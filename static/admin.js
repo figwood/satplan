@@ -460,6 +460,30 @@ function closeBulkTLEModal() {
     document.getElementById('bulkTLEModal').classList.remove('active');
 }
 
+async function autoUpdateTLEs() {
+    if (!confirm('This will automatically fetch TLE data from all configured sites. Continue?')) {
+        return;
+    }
+
+    try {
+        showToast('Fetching TLE data from sites...', 'success');
+        
+        const response = await apiCall('/tle/auto-update', {
+            method: 'POST'
+        });
+
+        let message = response.message;
+        if (response.data && response.data.failed_sites && response.data.failed_sites.length > 0) {
+            message += `\nWarning: Failed to fetch from sites: ${response.data.failed_sites.join(', ')}`;
+        }
+        
+        showToast(message, 'success');
+        loadTLEs();
+    } catch (error) {
+        showToast('Auto-update failed: ' + error.message, 'error');
+    }
+}
+
 async function deleteTLE(id, noradId) {
     if (!confirm(`Are you sure you want to delete TLE record for satellite ${noradId}?`)) {
         return;

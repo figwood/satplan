@@ -57,6 +57,8 @@ func main() {
 	protected.HandleFunc("/tle/sat/{norad_id}", handlers.GetTLEBySatellite(db)).Methods("GET")
 	protected.HandleFunc("/tle/{id}", handlers.DeleteTLE(db)).Methods("DELETE")
 	protected.HandleFunc("/sat/tle/update", handlers.UpdateTles(db)).Methods("POST")
+	protected.HandleFunc("/tle/sites", handlers.GetTLESites(db)).Methods("GET")
+	protected.HandleFunc("/tle/auto-update", handlers.AutoUpdateTLEs(db)).Methods("POST")
 
 	// Sensor routes
 	protected.HandleFunc("/sen/all", handlers.GetAllSensors(db)).Methods("GET")

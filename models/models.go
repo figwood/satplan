@@ -65,6 +65,14 @@ type TLE struct {
 	Line2      string `json:"line2"`
 }
 
+// TLESite represents a TLE data source
+type TLESite struct {
+	ID          int    `json:"id"`
+	Site        string `json:"site"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+}
+
 // User represents a system user
 type User struct {
 	ID       int    `json:"id"`

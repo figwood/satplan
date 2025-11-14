@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SatPlan Admin - Manage Satellites, Sensors & TLE</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
     <style>
         * {
             margin: 0;
@@ -402,7 +403,10 @@
         <div id="tle" class="tab-content">
             <div class="action-bar">
                 <h2>TLE Data</h2>
-                <button class="btn btn-primary" onclick="openBulkTLEModal()">Update TLE</button>
+                <div>
+                    <button class="btn btn-success" onclick="autoUpdateTLEs()" style="margin-right: 10px;">🔄 Auto Update from Sites</button>
+                    <button class="btn btn-primary" onclick="openBulkTLEModal()">✏️ Manual Update</button>
+                </div>
             </div>
             <div id="tleLoading" class="loading">Loading TLE data...</div>
             <div id="tleContent"></div>
