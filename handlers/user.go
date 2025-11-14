@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/figwood/satplan/models"
+	"satplan/models"
 )
 
 // GetAllUsers returns all users

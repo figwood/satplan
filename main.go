@@ -7,15 +7,16 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/figwood/satplan/auth"
-	"github.com/figwood/satplan/database"
-	"github.com/figwood/satplan/handlers"
+	"satplan/auth"
+	"satplan/database"
+	"satplan/handlers"
+
 	"github.com/gorilla/mux"
 )
 
 var (
 	db        *sql.DB
-	dataFile  = "satplan.db"
+	dataFile  = "data/satplan.db"
 	staticDir = "static"
 )
 

@@ -7,7 +7,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/figwood/satplan/models"
+	"satplan/models"
+
 	"github.com/gorilla/mux"
 )
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/figwood/satplan/models"
+	"satplan/models"
 )
 
 // HealthCheck returns the health status of the API
