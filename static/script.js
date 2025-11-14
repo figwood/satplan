@@ -472,12 +472,9 @@ async function callSensorInRegion(area) {
     }
     
     try {
-        console.log('Calling SensorInRegion with:', area);
-        
         // Get checked sensors from the tree
         const checkedSensors = getCheckedSensors();
         if (checkedSensors.length === 0) {
-            console.warn('No sensors selected. Clearing results.');
             // Clear regions from map
             const features = vectorSource.getFeatures();
             const planningAreaFeature = features.find(f => !f.get('regionData'));
@@ -489,8 +486,6 @@ async function callSensorInRegion(area) {
             displayResultsTable([], []);
             return;
         }
-        
-        console.log('Checked sensors:', checkedSensors);
         
         // Create Calculator instance
         const calc = new satpathModule.Calculator();
@@ -536,11 +531,8 @@ async function callSensorInRegion(area) {
         
         for (const [satId, satInfo] of Object.entries(satelliteGroups)) {
             if (!satInfo.tle1 || !satInfo.tle2) {
-                console.warn(`Skipping satellite ${satId}: missing TLE data`);
                 continue;
             }
-            
-            console.log(`Computing regions for satellite: ${satInfo.name}`);
             
             const regions = calc.SensorInRegion(
                 String(satId),
@@ -556,7 +548,6 @@ async function callSensorInRegion(area) {
             // Extract region data
             if (regions && typeof regions.size === 'function') {
                 const n = regions.size();
-                console.log(`Found ${n} regions for satellite ${satInfo.name}`);
                 
                 for (let i = 0; i < n; i++) {
                     const region = regions.get(i);
@@ -586,9 +577,6 @@ async function callSensorInRegion(area) {
                 }
             }
         }
-        
-        console.log('Total regions found:', allRegions.length);
-        console.log('Regions:', allRegions);
         
         // Display regions on map
         displayRegionsOnMap(allRegions);
