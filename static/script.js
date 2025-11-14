@@ -115,6 +115,10 @@ function initControls() {
     // Clear button
     const clearBtn = document.getElementById('clearBtn');
     clearBtn.addEventListener('click', clearMap);
+
+    // Export button
+    const exportBtn = document.getElementById('exportBtn');
+    exportBtn.addEventListener('click', exportToPDF);
 }
 
 // Toggle draw mode
@@ -762,6 +766,12 @@ function displayResultsTable(regions, sensors) {
     // Show the results container
     resultsContainer.style.display = 'flex';
     
+    // Enable export button
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.disabled = false;
+    }
+    
     // Hide the map coordinate label and show table coordinate label
     const mapCoordLabel = document.getElementById('mapCoordinateLabel');
     if (mapCoordLabel) {
@@ -777,6 +787,12 @@ function displayResultsTable(regions, sensors) {
 function hideResultsTable() {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'none';
+    
+    // Disable export button
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.disabled = true;
+    }
     
     // Show the map coordinate label and hide table coordinate label
     const mapCoordLabel = document.getElementById('mapCoordinateLabel');
@@ -835,4 +851,106 @@ function highlightRegion(region, clickedRow) {
             }));
         }
     });
+}
+
+// Export results to PDF
+function exportToPDF() {
+    const resultsTableBody = document.getElementById('resultsTableBody');
+    
+    // Check if there are any results
+    if (!resultsTableBody || resultsTableBody.children.length === 0) {
+        alert('No results to export. Please draw a planning area and run the analysis first.');
+        return;
+    }
+
+    // Get jsPDF
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    // Add title
+    doc.setFontSize(18);
+    doc.text('Satellite Planning Report', 14, 20);
+
+    // Add generation date
+    doc.setFontSize(10);
+    const now = new Date();
+    const dateStr = formatDateTime(now);
+    doc.text(`Generated: ${dateStr}`, 14, 28);
+
+    // Add planning area info if available
+    if (planningArea) {
+        doc.text(`Planning Area: [${planningArea.minLon.toFixed(3)}, ${planningArea.minLat.toFixed(3)}] to [${planningArea.maxLon.toFixed(3)}, ${planningArea.maxLat.toFixed(3)}]`, 14, 34);
+    }
+
+    // Prepare table data and calculate time range
+    const tableData = [];
+    const rows = resultsTableBody.querySelectorAll('tr');
+    let minStartTime = null;
+    let maxStopTime = null;
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 5) {
+            const startTimeStr = cells[3].textContent;
+            const stopTimeStr = cells[4].textContent;
+            
+            // Track min start time and max stop time
+            if (!minStartTime || startTimeStr < minStartTime) {
+                minStartTime = startTimeStr;
+            }
+            if (!maxStopTime || stopTimeStr > maxStopTime) {
+                maxStopTime = stopTimeStr;
+            }
+            
+            tableData.push([
+                cells[0].textContent, // Satellite
+                cells[1].textContent, // Sensor
+                cells[2].textContent, // Resolution
+                cells[3].textContent, // Start Time
+                cells[4].textContent  // Stop Time
+            ]);
+        }
+    });
+
+    // Add time range info
+    if (minStartTime && maxStopTime) {
+        doc.text(`Planning Period: ${minStartTime} to ${maxStopTime}`, 14, 40);
+    }
+
+    // Add table using autoTable plugin
+    doc.autoTable({
+        head: [['Satellite', 'Sensor', 'Resolution (m)', 'Start Time', 'Stop Time']],
+        body: tableData,
+        startY: planningArea ? 45 : 35,
+        theme: 'grid',
+        styles: {
+            fontSize: 9,
+            cellPadding: 3
+        },
+        headStyles: {
+            fillColor: [59, 130, 246],
+            textColor: 255,
+            fontStyle: 'bold'
+        },
+        alternateRowStyles: {
+            fillColor: [245, 247, 250]
+        }
+    });
+
+    // Add footer with page numbers
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width / 2, doc.internal.pageSize.height - 10, { align: 'center' });
+    }
+
+    // Generate filename with YYMMDD format
+    const year = String(now.getFullYear()).slice(-2);
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const filename = `report_${year}${month}${day}.pdf`;
+
+    // Save the PDF
+    doc.save(filename);
 }

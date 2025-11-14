@@ -354,6 +354,36 @@ body {
     transform: scale(0.95);
 }
 
+.export-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--success-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.export-btn:hover:not(:disabled) {
+    background: #059669;
+}
+
+.export-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.export-btn:disabled {
+    background: var(--border-color);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
 .coordinate-label {
     position: absolute;
     bottom: 10px;
