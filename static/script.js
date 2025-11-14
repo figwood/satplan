@@ -363,7 +363,10 @@ function handleCheckbox(event, nodeId, nodeType) {
         updateParentSatelliteState(nodeId);
     }
     
-    // You can add more functionality here, like showing/hiding on the map
+    // If a planning area is defined and results are displayed, refresh the results
+    if (planningArea && isResultsTableVisible()) {
+        refreshResults();
+    }
 }
 
 // Update the parent satellite's checkbox state based on its sensors
@@ -468,7 +471,16 @@ async function callSensorInRegion(area) {
         // Get checked sensors from the tree
         const checkedSensors = getCheckedSensors();
         if (checkedSensors.length === 0) {
-            console.warn('No sensors selected. Please check sensors in the tree.');
+            console.warn('No sensors selected. Clearing results.');
+            // Clear regions from map
+            const features = vectorSource.getFeatures();
+            const planningAreaFeature = features.find(f => !f.get('regionData'));
+            vectorSource.clear();
+            if (planningAreaFeature) {
+                vectorSource.addFeature(planningAreaFeature);
+            }
+            // Clear table content but keep it visible
+            displayResultsTable([], []);
             return;
         }
         
@@ -714,8 +726,28 @@ function displayResultsTable(regions, sensors) {
     const resultsContainer = document.getElementById('resultsContainer');
     const resultsTableBody = document.getElementById('resultsTableBody');
     
+    // Clear existing table rows
+    resultsTableBody.innerHTML = '';
+    
     if (!regions || regions.length === 0) {
-        resultsContainer.style.display = 'none';
+        // Show empty table with headers only
+        resultsContainer.style.display = 'flex';
+        
+        // Disable export button when no results
+        const exportBtn = document.getElementById('exportBtn');
+        if (exportBtn) {
+            exportBtn.disabled = true;
+        }
+        
+        // Show table coordinate label
+        const mapCoordLabel = document.getElementById('mapCoordinateLabel');
+        if (mapCoordLabel) {
+            mapCoordLabel.style.display = 'none';
+        }
+        const tableCoordLabel = document.getElementById('tableCoordinateLabel');
+        if (tableCoordLabel) {
+            tableCoordLabel.style.display = 'block';
+        }
         return;
     }
     
@@ -724,9 +756,6 @@ function displayResultsTable(regions, sensors) {
     sensors.forEach(sensor => {
         sensorMap[sensor.id] = sensor;
     });
-    
-    // Clear existing table rows
-    resultsTableBody.innerHTML = '';
     
     // Sort regions by start time
     const sortedRegions = [...regions].sort((a, b) => a.startTimestamp - b.startTimestamp);
@@ -803,6 +832,33 @@ function hideResultsTable() {
     if (tableCoordLabel) {
         tableCoordLabel.style.display = 'none';
     }
+}
+
+// Check if results table is visible
+function isResultsTableVisible() {
+    const resultsContainer = document.getElementById('resultsContainer');
+    return resultsContainer && resultsContainer.style.display !== 'none';
+}
+
+// Refresh results by re-running the sensor region calculation
+function refreshResults() {
+    if (!planningArea) {
+        console.warn('No planning area defined, cannot refresh results');
+        return;
+    }
+    
+    console.log('Refreshing results...');
+    
+    // Clear existing regions from map (keep the planning area rectangle)
+    const features = vectorSource.getFeatures();
+    const planningAreaFeature = features.find(f => !f.get('regionData'));
+    vectorSource.clear();
+    if (planningAreaFeature) {
+        vectorSource.addFeature(planningAreaFeature);
+    }
+    
+    // Re-run the sensor region calculation
+    callSensorInRegion(planningArea);
 }
 
 // Highlight a region on both table and map
