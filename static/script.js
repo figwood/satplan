@@ -37,6 +37,11 @@ function initMap() {
 
     map = new ol.Map({
         target: 'map',
+        controls: ol.control.defaults.defaults({
+            zoom: false,  // Disable default zoom control
+            attribution: true,
+            rotate: true
+        }),
         layers: [
             new ol.layer.Tile({
                 source: new ol.source.OSM()
@@ -47,6 +52,14 @@ function initMap() {
             center: ol.proj.fromLonLat([0, 0]),
             zoom: 2
         })
+    });
+
+    // Add mouse move listener to update coordinates
+    map.on('pointermove', function(evt) {
+        const coordinate = ol.proj.toLonLat(evt.coordinate);
+        const lon = coordinate[0].toFixed(3);
+        const lat = coordinate[1].toFixed(3);
+        document.getElementById('coordinateLabel').textContent = `${lon}, ${lat}`;
     });
 }
 
@@ -62,6 +75,19 @@ function initControls() {
     // Draw area button
     const drawAreaBtn = document.getElementById('drawAreaBtn');
     drawAreaBtn.addEventListener('click', toggleDrawMode);
+
+    // Zoom controls
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const fullExtentBtn = document.getElementById('fullExtentBtn');
+
+    zoomInBtn.addEventListener('click', zoomIn);
+    zoomOutBtn.addEventListener('click', zoomOut);
+    fullExtentBtn.addEventListener('click', zoomToFullExtent);
+
+    // Clear button
+    const clearBtn = document.getElementById('clearBtn');
+    clearBtn.addEventListener('click', clearMap);
 }
 
 // Toggle draw mode
@@ -347,4 +373,42 @@ function updateParentSatelliteState(sensorId) {
         satelliteCheckbox.classList.add('half-checked');
         satelliteCheckbox.indeterminate = true;
     }
+}
+
+// Zoom controls
+function zoomIn() {
+    const view = map.getView();
+    const zoom = view.getZoom();
+    view.animate({
+        zoom: zoom + 1,
+        duration: 250
+    });
+}
+
+function zoomOut() {
+    const view = map.getView();
+    const zoom = view.getZoom();
+    view.animate({
+        zoom: zoom - 1,
+        duration: 250
+    });
+}
+
+function zoomToFullExtent() {
+    const view = map.getView();
+    view.animate({
+        center: ol.proj.fromLonLat([0, 0]),
+        zoom: 2,
+        duration: 500
+    });
+}
+
+function clearMap() {
+    // Clear all features from the vector source
+    vectorSource.clear();
+    
+    // Reset planning area
+    planningArea = null;
+    
+    console.log('Map cleared');
 }

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SatPlan - Satellite Planning System</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v10.2.1/ol.css">
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -20,6 +21,11 @@
         
         <div class="map-container">
             <div class="map-controls">
+                <div class="control-group zoom-controls">
+                    <button id="zoomInBtn" class="zoom-btn" title="Zoom In">+</button>
+                    <button id="zoomOutBtn" class="zoom-btn" title="Zoom Out">−</button>
+                    <button id="fullExtentBtn" class="zoom-btn" title="Full Extent">⌂</button>
+                </div>
                 <div class="control-group">
                     <label for="planningDays">Planning Days:</label>
                     <select id="planningDays">
@@ -37,8 +43,16 @@
                         <span id="btnIcon">📐</span>
                         <span id="btnText">Draw Planning Area</span>
                     </button>
+                    <button id="clearBtn" class="clear-btn" title="Clear">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M16.24 3.56L21.19 8.5C21.97 9.29 21.97 10.55 21.19 11.34L12 20.53C10.44 22.09 7.91 22.09 6.34 20.53L2.81 17C2.03 16.21 2.03 14.95 2.81 14.16L13.41 3.56C14.2 2.78 15.46 2.78 16.24 3.56Z" fill="#E07856"/>
+                            <path d="M4.22 15.58L8.5 11.3L13.31 16.11L9.03 20.39L4.22 15.58Z" fill="#F4D19B"/>
+                            <path d="M15.72 4.95L19.78 9.01L18.5 10.29L14.44 6.23L15.72 4.95Z" fill="#3D3D3D"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
+            <div id="coordinateLabel" class="coordinate-label">0.00, 0.00</div>
             <div id="map"></div>
         </div>
     </div>

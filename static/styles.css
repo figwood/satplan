@@ -195,15 +195,15 @@ body {
 
 .map-controls {
     position: absolute;
-    top: 20px;
-    left: 80px;
+    top: 10px;
+    left: 10px;
     z-index: 1000;
     background: white;
-    padding: 15px 20px;
-    border-radius: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     display: flex;
-    gap: 20px;
+    gap: 12px;
     align-items: center;
     flex-wrap: wrap;
 }
@@ -267,6 +267,82 @@ body {
 
 .control-btn.active {
     background: var(--danger-color);
+}
+
+.clear-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    margin-left: 4px;
+}
+
+.clear-btn:hover {
+    background: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.clear-btn:active {
+    transform: scale(0.95);
+}
+
+.coordinate-label {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    z-index: 1000;
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    box-shadow: none;
+    pointer-events: none;
+    border: none;
+}
+
+.zoom-controls {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    margin-right: 8px;
+    padding-right: 12px;
+    border-right: 1px solid var(--border-color);
+}
+
+.zoom-btn {
+    width: 32px;
+    height: 32px;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    color: var(--text-primary);
+}
+
+.zoom-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.zoom-btn:active {
+    transform: scale(0.95);
 }
 
 #map {
