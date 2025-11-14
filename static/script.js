@@ -97,6 +97,11 @@ function initControls() {
     planningDaysSelect.addEventListener('change', function(e) {
         planningDays = parseInt(e.target.value);
         console.log('Planning days changed to:', planningDays);
+        
+        // If planning area is defined and results are displayed, refresh the results
+        if (planningArea && isResultsTableVisible()) {
+            refreshResults();
+        }
     });
 
     // Draw area button
