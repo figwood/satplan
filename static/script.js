@@ -139,8 +139,9 @@ function toggleDrawMode() {
         btnIcon.textContent = '✖️';
         btnText.textContent = 'Cancel Drawing';
 
-        // Clear previous drawings
+        // Clear previous drawings and results
         vectorSource.clear();
+        hideResultsTable();
 
         // Create DragBox interaction for rectangle drawing
         drawInteraction = new ol.interaction.DragBox({
@@ -522,10 +523,12 @@ async function callSensorInRegion(area) {
             vecSensors.push_back(sensor);
         });
         
-        // Time range: use current time + planning days
-        const now = Date.now();
-        const utcStartTime = Math.floor(now / 1000);
-        const utcEndTime = Math.floor((now + planningDays * 24 * 60 * 60 * 1000) / 1000);
+        // Time range: use current UTC date at 00:00:00 + planning days
+        const now = new Date();
+        const utcStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+        const utcEndDate = new Date(utcStartDate.getTime() + planningDays * 24 * 60 * 60 * 1000);
+        const utcStartTime = Math.floor(utcStartDate.getTime() / 1000);
+        const utcEndTime = Math.floor(utcEndDate.getTime() / 1000);
         
         // For each satellite with checked sensors, compute regions
         const satelliteGroups = groupSensorsBySatellite(checkedSensors);
@@ -715,14 +718,14 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// Helper function to format date to YYYY-MM-DD HH:mm:ss
+// Helper function to format date to YYYY-MM-DD HH:mm:ss in UTC
 function formatDateTime(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
@@ -932,37 +935,30 @@ function exportToPDF() {
     doc.setFontSize(18);
     doc.text('Satellite Planning Report', 14, 20);
 
-    // Add generation date
+    // Add generation date and UTC note
     doc.setFontSize(10);
-    const now = new Date();
-    const dateStr = formatDateTime(now);
-    doc.text(`Generated: ${dateStr}`, 14, 28);
+    const generationDate = new Date();
+    const dateStr = formatDateTime(generationDate);
+    doc.text(`Generated: ${dateStr} UTC`, 14, 28);
 
     // Add planning area info if available
     if (planningArea) {
         doc.text(`Planning Area: [${planningArea.minLon.toFixed(3)}, ${planningArea.minLat.toFixed(3)}] to [${planningArea.maxLon.toFixed(3)}, ${planningArea.maxLat.toFixed(3)}]`, 14, 34);
     }
+    
+    // Add note about UTC
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text('Note: All times are in UTC (Coordinated Universal Time)', 14, planningArea ? 40 : 34);
+    doc.setTextColor(0);
 
     // Prepare table data and calculate time range
     const tableData = [];
     const rows = resultsTableBody.querySelectorAll('tr');
-    let minStartTime = null;
-    let maxStopTime = null;
     
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length >= 5) {
-            const startTimeStr = cells[3].textContent;
-            const stopTimeStr = cells[4].textContent;
-            
-            // Track min start time and max stop time
-            if (!minStartTime || startTimeStr < minStartTime) {
-                minStartTime = startTimeStr;
-            }
-            if (!maxStopTime || stopTimeStr > maxStopTime) {
-                maxStopTime = stopTimeStr;
-            }
-            
             tableData.push([
                 cells[0].textContent, // Satellite
                 cells[1].textContent, // Sensor
@@ -973,16 +969,23 @@ function exportToPDF() {
         }
     });
 
+    // Calculate planning period from current UTC date at 00:00:00
+    const now = new Date();
+    const utcStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+    const utcEndDate = new Date(utcStartDate.getTime() + planningDays * 24 * 60 * 60 * 1000);
+    const planningStart = formatDateTime(utcStartDate);
+    const planningEnd = formatDateTime(utcEndDate);
+    
     // Add time range info
-    if (minStartTime && maxStopTime) {
-        doc.text(`Planning Period: ${minStartTime} to ${maxStopTime}`, 14, 40);
-    }
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text(`Planning Period: ${planningStart} to ${planningEnd}`, 14, planningArea ? 46 : 40);
 
     // Add table using autoTable plugin
     doc.autoTable({
-        head: [['Satellite', 'Sensor', 'Resolution (m)', 'Start Time', 'Stop Time']],
+        head: [['Satellite', 'Sensor', 'Resolution (m)', 'Start Time (UTC)', 'Stop Time (UTC)']],
         body: tableData,
-        startY: planningArea ? 45 : 35,
+        startY: planningArea ? 52 : 46,
         theme: 'grid',
         styles: {
             fontSize: 9,
