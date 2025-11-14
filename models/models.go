@@ -36,6 +36,17 @@ type TreeNode struct {
 	Name     string     `json:"name"`
 	HexColor string     `json:"hex_color,omitempty"`
 	Children []TreeNode `json:"children,omitempty"`
+	// Satellite-specific fields
+	SatNoradID string `json:"sat_norad_id,omitempty"`
+	TLE1       string `json:"tle1,omitempty"`
+	TLE2       string `json:"tle2,omitempty"`
+	// Sensor-specific fields
+	SatNoardID    string  `json:"sat_noard_id,omitempty"`
+	SatName       string  `json:"sat_name,omitempty"`
+	InitAngle     float64 `json:"init_angle,omitempty"`
+	LeftSideAngle float64 `json:"left_side_angle,omitempty"`
+	CurSideAngle  float64 `json:"cur_side_angle,omitempty"`
+	ObserveAngle  float64 `json:"observe_angle,omitempty"`
 }
 
 // SatelliteWithSensors represents a satellite with its sensors

@@ -271,9 +271,21 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 				continue
 			}
 
+			// Query latest TLE for this satellite
+			var tle1, tle2 string
+			err := db.QueryRow(`
+				SELECT line1, line2 FROM tle
+				WHERE sat_noard_id = ?
+				ORDER BY time DESC LIMIT 1
+			`, sat.NoardID).Scan(&tle1, &tle2)
+			if err != nil && err != sql.ErrNoRows {
+				log.Printf("Error querying TLE for satellite %s: %v", sat.NoardID, err)
+			}
+
 			// Query sensors for this satellite using noard_id
 			sensorRows, err := db.Query(`
-				SELECT s.id, s.name, s.resolution, s.width, s.observe_angle, s.hex_color
+				SELECT s.id, s.sat_noard_id, s.sat_name, s.name, s.init_angle, 
+				       s.left_side_angle, s.observe_angle, s.hex_color
 				FROM sensor s
 				WHERE s.sat_noard_id = ?
 				ORDER BY s.name
@@ -286,18 +298,26 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 			// Build sensor nodes
 			sensorNodes := []models.TreeNode{}
 			for sensorRows.Next() {
-				var sensor models.Sensor
-				if err := sensorRows.Scan(&sensor.ID, &sensor.Name, &sensor.Resolution,
-					&sensor.Width, &sensor.ObserveAngle, &sensor.HexColor); err != nil {
+				var sensorID int
+				var satNoardID, satName, sensorName, hexColor string
+				var initAngle, leftSideAngle, observeAngle float64
+				if err := sensorRows.Scan(&sensorID, &satNoardID, &satName, &sensorName,
+					&initAngle, &leftSideAngle, &observeAngle, &hexColor); err != nil {
 					log.Printf("Error scanning sensor: %v", err)
 					continue
 				}
 
 				sensorNode := models.TreeNode{
-					ID:       sensor.ID,
-					Type:     "sensor",
-					Name:     sensor.Name,
-					HexColor: sensor.HexColor,
+					ID:            sensorID,
+					Type:          "sensor",
+					Name:          sensorName,
+					HexColor:      hexColor,
+					SatNoardID:    satNoardID,
+					SatName:       satName,
+					InitAngle:     initAngle,
+					LeftSideAngle: leftSideAngle,
+					CurSideAngle:  leftSideAngle,
+					ObserveAngle:  observeAngle,
 				}
 				sensorNodes = append(sensorNodes, sensorNode)
 			}
@@ -305,11 +325,14 @@ func GetSatelliteTree(db *sql.DB) http.HandlerFunc {
 
 			// Create satellite node with sensors as children
 			satNode := models.TreeNode{
-				ID:       sat.ID,
-				Type:     "satellite",
-				Name:     sat.Name,
-				HexColor: sat.HexColor,
-				Children: sensorNodes,
+				ID:         sat.ID,
+				Type:       "satellite",
+				Name:       sat.Name,
+				HexColor:   sat.HexColor,
+				SatNoradID: sat.NoardID,
+				TLE1:       tle1,
+				TLE2:       tle2,
+				Children:   sensorNodes,
 			}
 			satelliteNodes = append(satelliteNodes, satNode)
 		}

@@ -11,8 +11,23 @@ let isDrawing = false;
 let planningDays = 3;
 let planningArea = null;
 
+// Satpath WebAssembly module
+let satpathModule = null;
+
+// Initialize satpath WASM module
+async function initSatpath() {
+    try {
+        console.log('Initializing satpath WebAssembly module...');
+        satpathModule = await createModule();
+        console.log('Satpath module initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize satpath module:', error);
+    }
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
+    initSatpath();
     initMap();
     loadTreeData();
     initControls();
@@ -136,6 +151,9 @@ function toggleDrawMode() {
             };
 
             console.log('Planning area defined:', planningArea);
+            
+            // Call SensorInRegion function with the drawn area
+            callSensorInRegion(planningArea);
             
             // Exit drawing mode
             setTimeout(() => {
@@ -411,4 +429,249 @@ function clearMap() {
     planningArea = null;
     
     console.log('Map cleared');
+}
+
+// Call SensorInRegion function from satpath WASM module
+async function callSensorInRegion(area) {
+    if (!satpathModule) {
+        console.error('Satpath module not initialized yet');
+        return;
+    }
+    
+    if (!area) {
+        console.error('No area defined');
+        return;
+    }
+    
+    try {
+        console.log('Calling SensorInRegion with:', area);
+        
+        // Get checked sensors from the tree
+        const checkedSensors = getCheckedSensors();
+        if (checkedSensors.length === 0) {
+            console.warn('No sensors selected. Please check sensors in the tree.');
+            return;
+        }
+        
+        console.log('Checked sensors:', checkedSensors);
+        
+        // Create Calculator instance
+        const calc = new satpathModule.Calculator();
+        
+        // Create TargetArea with west, east, north, south
+        const targetArea = new satpathModule.TargetArea(
+            area.minLon, // west
+            area.maxLon, // east
+            area.maxLat, // north
+            area.minLat  // south
+        );
+        
+        // Create VectorSensor and populate with checked sensors
+        const vecSensors = new satpathModule.VectorSensor();
+        checkedSensors.forEach(s => {
+            const sideAngle = s.cur_side_angle ?? s.left_side_angle ?? 0.0;
+            const observeAngle = s.observe_angle ?? 60.0;
+            const sensor = new satpathModule.Sensor(
+                s.sat_norad_id || '',
+                s.id,
+                s.sat_name || '',
+                s.name,
+                s.init_angle || 0.0,
+                sideAngle,
+                observeAngle
+            );
+            if (sensor.setHexColor) {
+                sensor.setHexColor(s.hex_color || '#000000');
+            }
+            vecSensors.push_back(sensor);
+        });
+        
+        // Time range: use current time + planning days
+        const now = Date.now();
+        const utcStartTime = Math.floor(now / 1000);
+        const utcEndTime = Math.floor((now + planningDays * 24 * 60 * 60 * 1000) / 1000);
+        
+        // For each satellite with checked sensors, compute regions
+        const satelliteGroups = groupSensorsBySatellite(checkedSensors);
+        const allRegions = [];
+        
+        for (const [satId, satInfo] of Object.entries(satelliteGroups)) {
+            if (!satInfo.tle1 || !satInfo.tle2) {
+                console.warn(`Skipping satellite ${satId}: missing TLE data`);
+                continue;
+            }
+            
+            console.log(`Computing regions for satellite: ${satInfo.name}`);
+            
+            const regions = calc.SensorInRegion(
+                String(satId),
+                String(satInfo.name),
+                String(satInfo.tle1),
+                String(satInfo.tle2),
+                vecSensors,
+                utcStartTime,
+                utcEndTime,
+                targetArea
+            );
+            
+            // Extract region data
+            if (regions && typeof regions.size === 'function') {
+                const n = regions.size();
+                console.log(`Found ${n} regions for satellite ${satInfo.name}`);
+                
+                for (let i = 0; i < n; i++) {
+                    const region = regions.get(i);
+                    if (!region || typeof region.getpGeometry !== 'function') continue;
+                    
+                    const geom = region.getpGeometry();
+                    const coords = [];
+                    if (geom && typeof geom.size === 'function') {
+                        const m = geom.size();
+                        for (let j = 0; j < m; j++) {
+                            const pt = geom.get(j);
+                            if (pt && typeof pt.getX === 'function' && typeof pt.getY === 'function') {
+                                coords.push([pt.getX(), pt.getY()]);
+                            }
+                        }
+                    }
+                    
+                    allRegions.push({
+                        coordinates: coords,
+                        startTimestamp: region.getStartTimestamp ? region.getStartTimestamp() : utcStartTime,
+                        endTimestamp: region.getStopTimestamp ? region.getStopTimestamp() : utcEndTime,
+                        color: region.getHexColor ? region.getHexColor() : '#ffcc33',
+                        sensorId: region.getSenId ? region.getSenId() : '',
+                        satId: String(satId),
+                        satName: String(satInfo.name),
+                    });
+                }
+            }
+        }
+        
+        console.log('Total regions found:', allRegions.length);
+        console.log('Regions:', allRegions);
+        
+        // Display regions on map
+        displayRegionsOnMap(allRegions);
+        
+    } catch (error) {
+        console.error('Error calling SensorInRegion:', error);
+    }
+}
+
+// Get checked sensors from the tree
+function getCheckedSensors() {
+    const sensors = [];
+    const sensorCheckboxes = document.querySelectorAll('input[id^="check-sensor-"]:checked');
+    
+    sensorCheckboxes.forEach(checkbox => {
+        const sensorId = checkbox.id.replace('check-sensor-', '');
+        // Find sensor data from treeData
+        const sensorData = findSensorById(treeData, parseInt(sensorId));
+        if (sensorData) {
+            sensors.push(sensorData);
+        }
+    });
+    
+    return sensors;
+}
+
+// Find sensor by ID in tree data
+function findSensorById(node, sensorId) {
+    if (node.type === 'sensor' && node.id === sensorId) {
+        return node;
+    }
+    
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+            const found = findSensorById(child, sensorId);
+            if (found) return found;
+        }
+    }
+    
+    return null;
+}
+
+// Find satellite node by norad_id
+function findSatelliteByNoradId(node, noradId) {
+    if (node.type === 'satellite' && node.sat_norad_id === noradId) {
+        return node;
+    }
+    
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+            const found = findSatelliteByNoradId(child, noradId);
+            if (found) return found;
+        }
+    }
+    
+    return null;
+}
+
+// Group sensors by satellite and collect TLE data
+function groupSensorsBySatellite(sensors) {
+    const groups = {};
+    
+    sensors.forEach(sensor => {
+        const satNoradId = sensor.sat_noard_id;
+        if (!groups[satNoradId]) {
+            // Find the satellite node to get TLE data
+            const satNode = findSatelliteByNoradId(treeData, satNoradId);
+            groups[satNoradId] = {
+                name: sensor.sat_name || 'Unknown',
+                tle1: satNode ? satNode.tle1 : '',
+                tle2: satNode ? satNode.tle2 : '',
+                sensors: []
+            };
+        }
+        groups[satNoradId].sensors.push(sensor);
+    });
+    
+    return groups;
+}
+
+// Display regions on map
+function displayRegionsOnMap(regions) {
+    if (!regions || regions.length === 0) {
+        console.log('No regions to display');
+        return;
+    }
+    
+    regions.forEach(region => {
+        if (!region.coordinates || region.coordinates.length === 0) return;
+        
+        // Create polygon from coordinates
+        const polygon = new ol.geom.Polygon([region.coordinates.map(coord => 
+            ol.proj.fromLonLat([coord[0], coord[1]])
+        )]);
+        
+        const feature = new ol.Feature({
+            geometry: polygon,
+            regionData: region
+        });
+        
+        // Style with region color
+        const color = region.color || '#ffcc33';
+        feature.setStyle(new ol.style.Style({
+            fill: new ol.style.Fill({
+                color: hexToRgba(color, 0.3)
+            }),
+            stroke: new ol.style.Stroke({
+                color: color,
+                width: 2
+            })
+        }));
+        
+        vectorSource.addFeature(feature);
+    });
+    
+    console.log(`Displayed ${regions.length} regions on map`);
+}
+
+// Helper function to convert hex color to rgba
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
