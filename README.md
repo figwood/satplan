@@ -1,6 +1,6 @@
 # SatPlan - Satellite Planning System
 
-A satellite mission planning and tracking system with Go backend serving a static frontend.
+A satellite mission planning system with Go backend serving a static frontend.
 
 ## Features
 
