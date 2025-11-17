@@ -50,6 +50,27 @@ function initMap() {
         })
     });
 
+    // Check if local tiles exist by testing a sample tile
+    let baseMapSource;
+    const testImage = new Image();
+    testImage.onload = function() {
+        // Local tiles exist, switch to them
+        const localSource = new ol.source.XYZ({
+            url: 'tiles/{z}/{x}/{-y}.png',
+            minZoom: 1,
+            maxZoom: 4,
+            attributions: 'Local Tiles'
+        });
+        map.getLayers().getArray()[0].setSource(localSource);
+    };
+    testImage.onerror = function() {
+        // Local tiles don't exist, keep using OSM (already set as default)
+    };
+    testImage.src = 'tiles/1/0/0.png';
+
+    // Default to OSM, will be replaced if local tiles are found
+    baseMapSource = new ol.source.OSM();
+
     map = new ol.Map({
         target: 'map',
         controls: ol.control.defaults.defaults({
@@ -59,7 +80,7 @@ function initMap() {
         }),
         layers: [
             new ol.layer.Tile({
-                source: new ol.source.OSM()
+                source: baseMapSource
             }),
             vectorLayer
         ],
