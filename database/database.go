@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // InitDB initializes the database connection and creates tables if needed
@@ -14,7 +14,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	// Check if database exists
 	dbExists := fileExists(dbPath)
 
-	database, err := sql.Open("sqlite3", dbPath)
+	database, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
