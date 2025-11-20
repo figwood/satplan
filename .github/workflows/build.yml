@@ -52,12 +52,28 @@ jobs:
       - name: Run tests
         run: go test -v ./...
 
+      - name: Package artifacts (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p build-artifact
+          cp satplan build-artifact/
+          cp -r static build-artifact/
+          [ -f init.sql ] && cp init.sql build-artifact/ || true
+          [ -f README.md ] && cp README.md build-artifact/ || true
+
+      - name: Package artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build-artifact
+          Copy-Item satplan.exe build-artifact/
+          Copy-Item -Recurse -Force static build-artifact/static
+          if (Test-Path init.sql) { Copy-Item init.sql build-artifact/ }
+          if (Test-Path README.md) { Copy-Item README.md build-artifact/ }
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: satplan-${{ matrix.os }}
-          path: |
-            satplan
-            satplan.exe
+          path: build-artifact/
           retention-days: 5
-          if-no-files-found: ignore
