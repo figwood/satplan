@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
@@ -13,6 +14,12 @@ import (
 func InitDB(dbPath string) (*sql.DB, error) {
 	// Check if database exists
 	dbExists := fileExists(dbPath)
+
+	// Ensure the directory exists before opening the database
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %v", err)
+	}
 
 	database, err := sql.Open("sqlite", dbPath)
 	if err != nil {
