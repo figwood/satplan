@@ -76,11 +76,11 @@ jobs:
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release/static
+          New-Item -ItemType Directory -Force -Path release
           Copy-Item ${{ matrix.output }} release/
-          Copy-Item -Recurse static/* release/static/
-          Copy-Item init.sql release/ -ErrorAction SilentlyContinue
-          Copy-Item README.md release/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force static release/
+          if (Test-Path init.sql) { Copy-Item init.sql release/ }
+          if (Test-Path README.md) { Copy-Item README.md release/ }
           Compress-Archive -Path release/* -DestinationPath ${{ matrix.asset_name }}
 
       - name: Upload artifact
