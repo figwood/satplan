@@ -25,8 +25,8 @@ jobs:
             output: satplan
             asset_name: satplan-linux-arm64.zip
           
-          # macOS builds
-          - os: macos-latest
+          # macOS builds - use native ARM64 runner for ARM64 build
+          - os: macos-13
             goos: darwin
             goarch: amd64
             output: satplan
@@ -57,7 +57,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: 0
         run: |
           go build -o ${{ matrix.output }} -ldflags="-s -w" .
 
