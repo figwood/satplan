@@ -298,152 +298,56 @@ func AutoUpdateTLEs(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Get all TLE sites
-		rows, err := db.Query("SELECT id, site, url, description FROM tle_site")
+		result, err := performTLEUpdateCore(db)
+
+		// Handle errors
 		if err != nil {
-			response := models.Response{
-				Success: false,
-				Message: "Failed to query TLE sites: " + err.Error(),
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		defer rows.Close()
+			statusCode := http.StatusInternalServerError
+			message := err.Error()
 
-		sites := []models.TLESite{}
-		for rows.Next() {
-			var site models.TLESite
-			if err := rows.Scan(&site.ID, &site.Site, &site.URL, &site.Description); err != nil {
-				log.Printf("Error scanning TLE site: %v", err)
-				continue
+			// Determine appropriate status code based on error
+			if result == nil {
+				// Critical error before any processing
+				statusCode = http.StatusBadRequest
+			} else if result.Inserted == 0 {
+				// No records inserted
+				statusCode = http.StatusBadRequest
+				if len(result.NotFound) > 0 {
+					message = fmt.Sprintf("Failed to insert any TLE records. All %d records were skipped. Satellites not in database: %v",
+						result.Skipped, result.NotFound)
+				} else {
+					message = fmt.Sprintf("Failed to insert any TLE records. All %d records were skipped.", result.Skipped)
+				}
 			}
-			sites = append(sites, site)
-		}
 
-		if len(sites) == 0 {
-			response := models.Response{
-				Success: false,
-				Message: "No TLE sites configured",
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		// Fetch and parse TLE data from each site
-		allTLEs := []models.TLE{}
-		failedSites := []string{}
-
-		for _, site := range sites {
-			tles, err := fetchTLEFromURL(site.URL)
-			if err != nil {
-				log.Printf("Failed to fetch TLE from %s: %v", site.Site, err)
-				failedSites = append(failedSites, site.Site)
-				continue
-			}
-			allTLEs = append(allTLEs, tles...)
-		}
-
-		if len(allTLEs) == 0 {
-			message := "No TLE data fetched from any site"
-			if len(failedSites) > 0 {
-				message += fmt.Sprintf(". Failed sites: %v", failedSites)
-			}
 			response := models.Response{
 				Success: false,
 				Message: message,
 			}
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(statusCode)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		// Begin transaction to insert TLEs
-		tx, err := db.Begin()
-		if err != nil {
-			response := models.Response{
-				Success: false,
-				Message: "Failed to begin transaction: " + err.Error(),
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		defer tx.Rollback()
-
-		// Insert TLEs only for satellites that exist in the satellite table
-		inserted := 0
-		skipped := 0
-		notFound := []string{}
-
-		for _, tle := range allTLEs {
-			// Check if satellite exists in satellite table
-			var exists bool
-			err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM satellite WHERE noard_id = ?)", tle.SatNoardID).Scan(&exists)
-			if err != nil {
-				log.Printf("Failed to check satellite existence for %s: %v", tle.SatNoardID, err)
-				skipped++
-				continue
-			}
-
-			if !exists {
-				notFound = append(notFound, tle.SatNoardID)
-				skipped++
-				continue
-			}
-
-			// Insert TLE for existing satellite
-			_, err = tx.Exec("INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)",
-				tle.SatNoardID, tle.Time, tle.Line1, tle.Line2)
-			if err != nil {
-				log.Printf("Failed to insert TLE for satellite %s: %v", tle.SatNoardID, err)
-				skipped++
-				continue
-			}
-			inserted++
+		// Build success message
+		message := fmt.Sprintf("Successfully updated %d TLE record(s) from %d site(s)",
+			result.Inserted, result.SitesCount)
+		if result.Skipped > 0 {
+			message += fmt.Sprintf(" (%d skipped)", result.Skipped)
 		}
 
-		if inserted == 0 {
-			message := fmt.Sprintf("Failed to insert any TLE records. All %d records were skipped.", skipped)
-			if len(notFound) > 0 {
-				message += fmt.Sprintf(" Satellites not in database: %v", notFound)
-			}
-			response := models.Response{
-				Success: false,
-				Message: message,
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		if err := tx.Commit(); err != nil {
-			response := models.Response{
-				Success: false,
-				Message: "Failed to commit transaction: " + err.Error(),
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		message := fmt.Sprintf("Successfully updated %d TLE record(s) from %d site(s)", inserted, len(sites)-len(failedSites))
-		if skipped > 0 {
-			message += fmt.Sprintf(" (%d skipped)", skipped)
-		}
-
+		// Build response data
 		responseData := map[string]interface{}{
-			"inserted":    inserted,
-			"skipped":     skipped,
-			"total":       len(allTLEs),
-			"sites_count": len(sites) - len(failedSites),
+			"inserted":    result.Inserted,
+			"skipped":     result.Skipped,
+			"total":       result.TotalFetched,
+			"sites_count": result.SitesCount,
 		}
-		if len(failedSites) > 0 {
-			responseData["failed_sites"] = failedSites
+		if len(result.FailedSites) > 0 {
+			responseData["failed_sites"] = result.FailedSites
 		}
-		if len(notFound) > 0 {
-			responseData["not_found"] = notFound
+		if len(result.NotFound) > 0 {
+			responseData["not_found"] = result.NotFound
 		}
 
 		response := models.Response{
@@ -539,4 +443,119 @@ func extractNoradID(line1 string) string {
 		}
 	}
 	return ""
+}
+
+// TLEUpdateResult contains the results of a TLE update operation
+type TLEUpdateResult struct {
+	Inserted     int
+	Skipped      int
+	TotalFetched int
+	SitesCount   int
+	FailedSites  []string
+	NotFound     []string
+}
+
+// performTLEUpdateCore is the core reusable function for TLE updates
+// It fetches TLE data from configured sites and updates the database
+func performTLEUpdateCore(db *sql.DB) (*TLEUpdateResult, error) {
+	result := &TLEUpdateResult{
+		FailedSites: []string{},
+		NotFound:    []string{},
+	}
+
+	// Get all TLE sites
+	rows, err := db.Query("SELECT id, site, url, description FROM tle_site")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query TLE sites: %v", err)
+	}
+	defer rows.Close()
+
+	sites := []models.TLESite{}
+	for rows.Next() {
+		var site models.TLESite
+		if err := rows.Scan(&site.ID, &site.Site, &site.URL, &site.Description); err != nil {
+			log.Printf("Error scanning TLE site: %v", err)
+			continue
+		}
+		sites = append(sites, site)
+	}
+
+	if len(sites) == 0 {
+		return nil, fmt.Errorf("no TLE sites configured")
+	}
+
+	// Fetch and parse TLE data from each site
+	allTLEs := []models.TLE{}
+
+	for _, site := range sites {
+		tles, err := fetchTLEFromURL(site.URL)
+		if err != nil {
+			log.Printf("Failed to fetch TLE from %s: %v", site.Site, err)
+			result.FailedSites = append(result.FailedSites, site.Site)
+			continue
+		}
+		allTLEs = append(allTLEs, tles...)
+	}
+
+	result.TotalFetched = len(allTLEs)
+	result.SitesCount = len(sites) - len(result.FailedSites)
+
+	if len(allTLEs) == 0 {
+		return result, fmt.Errorf("no TLE data fetched from any site")
+	}
+
+	// Begin transaction to insert TLEs
+	tx, err := db.Begin()
+	if err != nil {
+		return result, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Insert TLEs only for satellites that exist in the satellite table
+	for _, tle := range allTLEs {
+		// Check if satellite exists in satellite table
+		var exists bool
+		err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM satellite WHERE noard_id = ?)", tle.SatNoardID).Scan(&exists)
+		if err != nil {
+			log.Printf("Failed to check satellite existence for %s: %v", tle.SatNoardID, err)
+			result.Skipped++
+			continue
+		}
+
+		if !exists {
+			result.NotFound = append(result.NotFound, tle.SatNoardID)
+			result.Skipped++
+			continue
+		}
+
+		// Insert TLE for existing satellite
+		_, err = tx.Exec("INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)",
+			tle.SatNoardID, tle.Time, tle.Line1, tle.Line2)
+		if err != nil {
+			log.Printf("Failed to insert TLE for satellite %s: %v", tle.SatNoardID, err)
+			result.Skipped++
+			continue
+		}
+		result.Inserted++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return result, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return result, nil
+}
+
+// PerformAutoUpdateTLEs performs automatic TLE update without HTTP context
+// This is used for initial database setup and scheduled updates
+func PerformAutoUpdateTLEs(db *sql.DB) error {
+	result, err := performTLEUpdateCore(db)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("TLE auto-update completed: %d inserted, %d skipped from %d site(s)",
+		result.Inserted, result.Skipped, result.SitesCount)
+
+	return nil
 }

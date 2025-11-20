@@ -22,6 +22,17 @@ async function apiCall(endpoint, options = {}) {
     const data = await response.json();
 
     if (!response.ok) {
+        // Handle expired/invalid token - redirect to login
+        if (response.status === 401) {
+            localStorage.removeItem('authToken');
+            authToken = null;
+            document.getElementById('loginContainer').style.display = 'block';
+            document.getElementById('adminPanel').style.display = 'none';
+            const loginError = document.getElementById('loginError');
+            if (loginError) {
+                loginError.innerHTML = '<div class="error">Session expired. Please login again.</div>';
+            }
+        }
         throw new Error(data.message || 'API request failed');
     }
 

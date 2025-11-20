@@ -24,11 +24,22 @@ func main() {
 	// Initialize database
 	var err error
 	dbPath := getEnvOrDefault("DB_PATH", dataFile)
-	db, err = database.InitDB(dbPath)
+	db, isNewDB, err := database.InitDB(dbPath)
 	if err != nil {
 		log.Fatal("Failed to initialize database:", err)
 	}
 	defer db.Close()
+
+	// If this is a new database, automatically fetch TLE data
+	if isNewDB {
+		log.Println("New database detected, fetching initial TLE data...")
+		if err := handlers.PerformAutoUpdateTLEs(db); err != nil {
+			log.Printf("Warning: Failed to fetch initial TLE data: %v", err)
+			log.Println("You can manually update TLE data later via the admin panel")
+		} else {
+			log.Println("Initial TLE data fetched successfully")
+		}
+	}
 
 	// Create router
 	r := mux.NewRouter()
