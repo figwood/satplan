@@ -64,24 +64,25 @@ jobs:
       - name: Prepare release assets (Unix)
         if: matrix.goos != 'windows'
         run: |
-          mkdir -p release/static
+          mkdir -p release
           cp ${{ matrix.output }} release/
-          cp -r static/* release/static/
-          cp init.sql release/ || true
-          cp README.md release/ || true
+          cp -r static release/
+          [ -f init.sql ] && cp init.sql release/ || true
+          [ -f README.md ] && cp README.md release/ || true
           cd release
-          zip -r ../${{ matrix.asset_name }} .
+          zip -r ../${{ matrix.asset_name }} *
 
       - name: Prepare release assets (Windows)
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release
-          Copy-Item ${{ matrix.output }} release/
-          Copy-Item -Recurse -Force static release/
+          Copy-Item "${{ matrix.output }}" release/
+          Copy-Item -Recurse -Force static release/static
           if (Test-Path init.sql) { Copy-Item init.sql release/ }
           if (Test-Path README.md) { Copy-Item README.md release/ }
-          Compress-Archive -Path release/* -DestinationPath ${{ matrix.asset_name }}
+          Get-ChildItem -Path release -Recurse
+          Compress-Archive -Path release\* -DestinationPath ${{ matrix.asset_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
