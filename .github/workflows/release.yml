@@ -1,0 +1,121 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            output: satplan
+            asset_name: satplan-linux-amd64.zip
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            output: satplan
+            asset_name: satplan-linux-arm64.zip
+          
+          # macOS builds
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            output: satplan
+            asset_name: satplan-darwin-amd64.zip
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            output: satplan
+            asset_name: satplan-darwin-arm64.zip
+          
+          # Windows builds
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            output: satplan.exe
+            asset_name: satplan-windows-amd64.zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          go build -o ${{ matrix.output }} -ldflags="-s -w" .
+
+      - name: Prepare release assets (Unix)
+        if: matrix.goos != 'windows'
+        run: |
+          mkdir -p release/static
+          cp ${{ matrix.output }} release/
+          cp -r static/* release/static/
+          cp init.sql release/ || true
+          cp README.md release/ || true
+          cd release
+          zip -r ../${{ matrix.asset_name }} .
+
+      - name: Prepare release assets (Windows)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/static
+          Copy-Item ${{ matrix.output }} release/
+          Copy-Item -Recurse static/* release/static/
+          Copy-Item init.sql release/ -ErrorAction SilentlyContinue
+          Copy-Item README.md release/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path release/* -DestinationPath ${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
