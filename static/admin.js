@@ -79,9 +79,11 @@ function switchTab(tabName) {
     event.target.classList.add('active');
     document.getElementById(tabName).classList.add('active');
     
-    // Load data when switching to account tab
+    // Load data when switching to specific tabs
     if (tabName === 'account') {
         loadUserInfo();
+    } else if (tabName === 'tleSites') {
+        loadTLESites();
     }
 }
 
@@ -605,6 +607,150 @@ document.querySelectorAll('.modal').forEach(modal => {
             modal.classList.remove('active');
         }
     });
+});
+
+// ==================== TLE SITES ====================
+
+async function loadTLESites() {
+    const loading = document.getElementById('tleSitesLoading');
+    const content = document.getElementById('tleSitesContent');
+    
+    loading.style.display = 'block';
+    content.innerHTML = '';
+
+    try {
+        const response = await apiCall('/tle/sites');
+        const sites = response.data || [];
+
+        loading.style.display = 'none';
+
+        if (sites.length === 0) {
+            content.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🌐</div>
+                    <p>No TLE sites configured. Add a site to enable automatic updates!</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Site Name</th>
+                        <th>URL</th>
+                        <th>Description</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        sites.forEach(site => {
+            html += `
+                <tr>
+                    <td>${site.id}</td>
+                    <td>${site.site}</td>
+                    <td style="font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${site.url}</td>
+                    <td>${site.description || '-'}</td>
+                    <td>
+                        <button class="btn btn-primary btn-small" onclick="editTLESite(${site.id})">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteTLESite(${site.id}, '${site.site.replace(/'/g, "\\'")}')">Delete</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+        content.innerHTML = html;
+    } catch (error) {
+        loading.style.display = 'none';
+        content.innerHTML = `<div class="error">Error loading TLE sites: ${error.message}</div>`;
+    }
+}
+
+function openAddTLESiteModal() {
+    currentEditId = null;
+    document.getElementById('tleSiteModalTitle').textContent = 'Add TLE Site';
+    document.getElementById('tleSiteForm').reset();
+    document.getElementById('tleSiteModalError').innerHTML = '';
+    document.getElementById('tleSiteModal').classList.add('active');
+}
+
+function closeTLESiteModal() {
+    document.getElementById('tleSiteModal').classList.remove('active');
+}
+
+async function editTLESite(id) {
+    currentEditId = id;
+    document.getElementById('tleSiteModalTitle').textContent = 'Edit TLE Site';
+    document.getElementById('tleSiteModalError').innerHTML = '';
+
+    try {
+        const response = await apiCall(`/tle/sites/${id}`);
+        const site = response.data;
+
+        document.getElementById('tleSiteName').value = site.site;
+        document.getElementById('tleSiteURL').value = site.url;
+        document.getElementById('tleSiteDescription').value = site.description || '';
+
+        document.getElementById('tleSiteModal').classList.add('active');
+    } catch (error) {
+        alert('Error loading TLE site: ' + error.message);
+    }
+}
+
+async function deleteTLESite(id, name) {
+    if (!confirm(`Are you sure you want to delete TLE site "${name}"?`)) {
+        return;
+    }
+
+    try {
+        await apiCall(`/tle/sites/${id}`, { method: 'DELETE' });
+        showToast('TLE site deleted successfully', 'success');
+        loadTLESites();
+    } catch (error) {
+        alert('Error deleting TLE site: ' + error.message);
+    }
+}
+
+document.getElementById('tleSiteForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorDiv = document.getElementById('tleSiteModalError');
+    errorDiv.innerHTML = '';
+
+    const siteData = {
+        site: document.getElementById('tleSiteName').value,
+        url: document.getElementById('tleSiteURL').value,
+        description: document.getElementById('tleSiteDescription').value
+    };
+
+    try {
+        if (currentEditId) {
+            await apiCall(`/tle/sites/update/${currentEditId}`, {
+                method: 'PUT',
+                body: JSON.stringify(siteData)
+            });
+            showToast('TLE site updated successfully', 'success');
+        } else {
+            await apiCall('/tle/sites/add', {
+                method: 'POST',
+                body: JSON.stringify(siteData)
+            });
+            showToast('TLE site added successfully', 'success');
+        }
+
+        closeTLESiteModal();
+        loadTLESites();
+    } catch (error) {
+        errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
+    }
 });
 
 // ==================== ACCOUNT ====================

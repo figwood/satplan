@@ -559,3 +559,203 @@ func PerformAutoUpdateTLEs(db *sql.DB) error {
 
 	return nil
 }
+
+// GetTLESiteById returns a specific TLE site by ID
+func GetTLESiteById(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		var site models.TLESite
+		err := db.QueryRow("SELECT id, site, url, description FROM tle_site WHERE id = ?", id).
+			Scan(&site.ID, &site.Site, &site.URL, &site.Description)
+
+		if err == sql.ErrNoRows {
+			response := models.Response{
+				Success: false,
+				Message: "TLE site not found",
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to query TLE site: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := models.Response{
+			Success: true,
+			Message: "TLE site retrieved successfully",
+			Data:    site,
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// AddTLESite adds a new TLE site
+func AddTLESite(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		var site models.TLESite
+		if err := json.NewDecoder(r.Body).Decode(&site); err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Invalid request body: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate required fields
+		if site.Site == "" || site.URL == "" {
+			response := models.Response{
+				Success: false,
+				Message: "Site name and URL are required",
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		result, err := db.Exec("INSERT INTO tle_site (site, url, description) VALUES (?, ?, ?)",
+			site.Site, site.URL, site.Description)
+
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to add TLE site: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		id, _ := result.LastInsertId()
+		site.ID = int(id)
+
+		response := models.Response{
+			Success: true,
+			Message: "TLE site added successfully",
+			Data:    site,
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// UpdateTLESite updates an existing TLE site
+func UpdateTLESite(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		var site models.TLESite
+		if err := json.NewDecoder(r.Body).Decode(&site); err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Invalid request body: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate required fields
+		if site.Site == "" || site.URL == "" {
+			response := models.Response{
+				Success: false,
+				Message: "Site name and URL are required",
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		result, err := db.Exec("UPDATE tle_site SET site = ?, url = ?, description = ? WHERE id = ?",
+			site.Site, site.URL, site.Description, id)
+
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to update TLE site: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			response := models.Response{
+				Success: false,
+				Message: "TLE site not found",
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := models.Response{
+			Success: true,
+			Message: "TLE site updated successfully",
+			Data:    site,
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// DeleteTLESite deletes a TLE site
+func DeleteTLESite(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		result, err := db.Exec("DELETE FROM tle_site WHERE id = ?", id)
+
+		if err != nil {
+			response := models.Response{
+				Success: false,
+				Message: "Failed to delete TLE site: " + err.Error(),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			response := models.Response{
+				Success: false,
+				Message: "TLE site not found",
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := models.Response{
+			Success: true,
+			Message: "TLE site deleted successfully",
+		}
+
+		json.NewEncoder(w).Encode(response)
+	}
+}

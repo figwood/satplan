@@ -69,6 +69,10 @@ func main() {
 	protected.HandleFunc("/tle/{id}", handlers.DeleteTLE(db)).Methods("DELETE")
 	protected.HandleFunc("/sat/tle/update", handlers.UpdateTles(db)).Methods("POST")
 	protected.HandleFunc("/tle/sites", handlers.GetTLESites(db)).Methods("GET")
+	protected.HandleFunc("/tle/sites/add", handlers.AddTLESite(db)).Methods("POST")
+	protected.HandleFunc("/tle/sites/{id}", handlers.GetTLESiteById(db)).Methods("GET")
+	protected.HandleFunc("/tle/sites/update/{id}", handlers.UpdateTLESite(db)).Methods("PUT")
+	protected.HandleFunc("/tle/sites/{id}", handlers.DeleteTLESite(db)).Methods("DELETE")
 	protected.HandleFunc("/tle/auto-update", handlers.AutoUpdateTLEs(db)).Methods("POST")
 
 	// Sensor routes

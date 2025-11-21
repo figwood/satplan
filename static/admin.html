@@ -377,6 +377,7 @@
             <button class="tab-btn active" onclick="switchTab('satellites')">Satellites</button>
             <button class="tab-btn" onclick="switchTab('sensors')">Sensors</button>
             <button class="tab-btn" onclick="switchTab('tle')">TLE Data</button>
+            <button class="tab-btn" onclick="switchTab('tleSites')">TLE Sites</button>
             <button class="tab-btn" onclick="switchTab('account')">Account</button>
         </div>
 
@@ -411,6 +412,17 @@
             </div>
             <div id="tleLoading" class="loading">Loading TLE data...</div>
             <div id="tleContent"></div>
+        </div>
+
+        <!-- TLE Sites Tab -->
+        <div id="tleSites" class="tab-content">
+            <div class="action-bar">
+                <h2>TLE Site Settings</h2>
+                <button class="btn btn-primary" onclick="openAddTLESiteModal()">+ Add TLE Site</button>
+            </div>
+            <p style="color: #718096; margin-bottom: 20px;">Configure external data sources for automatic TLE updates</p>
+            <div id="tleSitesLoading" class="loading">Loading TLE sites...</div>
+            <div id="tleSitesContent"></div>
         </div>
 
         <!-- Account Tab -->
@@ -601,6 +613,36 @@ HUBBLE
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TLE Site Edit Modal -->
+    <div id="tleSiteModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2 id="tleSiteModalTitle">Add TLE Site</h2>
+            </div>
+            <div id="tleSiteModalError"></div>
+            <form id="tleSiteForm">
+                <div class="form-group">
+                    <label for="tleSiteName">Site Name *</label>
+                    <input type="text" id="tleSiteName" required placeholder="e.g., Celestrak Resources">
+                    <small>A friendly name for this TLE data source</small>
+                </div>
+                <div class="form-group">
+                    <label for="tleSiteURL">URL *</label>
+                    <input type="url" id="tleSiteURL" required placeholder="http://celestrak.com/NORAD/elements/resource.txt">
+                    <small>The URL to fetch TLE data from (must be in 3-line TLE format)</small>
+                </div>
+                <div class="form-group">
+                    <label for="tleSiteDescription">Description</label>
+                    <textarea id="tleSiteDescription" rows="3" placeholder="Optional description of this data source"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeTLESiteModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save</button>
                 </div>
             </form>
         </div>
