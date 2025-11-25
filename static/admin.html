@@ -449,20 +449,30 @@
 
     <!-- Satellite Modal -->
     <div id="satelliteModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 700px;">
             <div class="modal-header">
                 <h2 id="satelliteModalTitle">Add Satellite</h2>
+                <p style="color: #718096; font-size: 14px; margin-top: 8px;">Paste TLE data to auto-fill NORAD ID and optionally the name</p>
             </div>
             <div id="satelliteModalError"></div>
             <form id="satelliteForm">
                 <div class="form-group">
-                    <label for="satNoardID">NORAD ID *</label>
-                    <input type="text" id="satNoardID" required>
-                    <small>Unique NORAD identifier for the satellite</small>
-                </div>
-                <div class="form-group">
                     <label for="satName">Name *</label>
                     <input type="text" id="satName" required>
+                    <small>Satellite name (auto-filled from 3-line TLE format)</small>
+                </div>
+                <div class="form-group">
+                    <label for="satTLEData">TLE Data *</label>
+                    <textarea id="satTLEData" rows="6" required placeholder="Example (2 or 3 lines):
+ISS (ZARYA)
+1 25544U 98067A   23001.00000000  .00016717  00000-0  10270-3 0  9005
+2 25544  51.6461 123.4567   0.0007890  45.6789 123.4567 15.54012345678901" style="font-family: monospace; font-size: 12px;"></textarea>
+                    <small>Two-line or three-line TLE format. NORAD ID will be parsed automatically.</small>
+                </div>
+                <div class="form-group">
+                    <label for="satParsedNoradID">Parsed NORAD ID</label>
+                    <input type="text" id="satParsedNoradID" readonly style="background-color: #f7fafc;">
+                    <small>Automatically extracted from TLE data</small>
                 </div>
                 <div class="form-group">
                     <label for="satHexColor">Color</label>
@@ -485,12 +495,11 @@
             <div id="sensorModalError"></div>
             <form id="sensorForm">
                 <div class="form-group">
-                    <label for="senSatNoardID">Satellite NORAD ID *</label>
-                    <input type="text" id="senSatNoardID" required>
-                </div>
-                <div class="form-group">
-                    <label for="senSatName">Satellite Name</label>
-                    <input type="text" id="senSatName">
+                    <label for="senSatelliteSelect">Satellite *</label>
+                    <select id="senSatelliteSelect" required>
+                        <option value="">Select a satellite...</option>
+                    </select>
+                    <small>Select the satellite this sensor belongs to</small>
                 </div>
                 <div class="form-group">
                     <label for="senName">Sensor Name *</label>

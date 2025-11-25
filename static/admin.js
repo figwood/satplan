@@ -168,6 +168,7 @@ function openAddSatelliteModal() {
     document.getElementById('satelliteModalTitle').textContent = 'Add Satellite';
     document.getElementById('satelliteForm').reset();
     document.getElementById('satelliteModalError').innerHTML = '';
+    document.getElementById('satParsedNoradID').value = '';
     document.getElementById('satelliteModal').classList.add('active');
 }
 
@@ -184,9 +185,27 @@ async function editSatellite(id) {
         const response = await apiCall(`/sat/${id}`);
         const sat = response.data;
 
-        document.getElementById('satNoardID').value = sat.noard_id;
         document.getElementById('satName').value = sat.name;
         document.getElementById('satHexColor').value = sat.hex_color;
+        
+        // For edit mode, we need to fetch TLE data
+        try {
+            const tleResponse = await apiCall(`/tle/sat/${sat.noard_id}`);
+            if (tleResponse.data && tleResponse.data.length > 0) {
+                const tle = tleResponse.data[0];
+                const tleText = `${sat.name}\n${tle.line1}\n${tle.line2}`;
+                document.getElementById('satTLEData').value = tleText;
+                document.getElementById('satParsedNoradID').value = sat.noard_id;
+            } else {
+                // No TLE data available, show placeholder
+                document.getElementById('satTLEData').value = '';
+                document.getElementById('satParsedNoradID').value = sat.noard_id;
+            }
+        } catch (tleError) {
+            // TLE fetch failed, just show NORAD ID
+            document.getElementById('satTLEData').value = '';
+            document.getElementById('satParsedNoradID').value = sat.noard_id;
+        }
 
         document.getElementById('satelliteModal').classList.add('active');
     } catch (error) {
@@ -207,18 +226,98 @@ async function deleteSatellite(id, name) {
     }
 }
 
+// Parse TLE data from satellite form
+function parseSatelliteTLE(tleText) {
+    const lines = tleText.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    let name = '';
+    let line1 = '';
+    let line2 = '';
+    let noradId = '';
+    
+    if (lines.length === 2) {
+        // 2-line format
+        line1 = lines[0];
+        line2 = lines[1];
+    } else if (lines.length === 3) {
+        // 3-line format
+        name = lines[0];
+        line1 = lines[1];
+        line2 = lines[2];
+    } else {
+        throw new Error('TLE data must be either 2 lines (Line 1 and Line 2) or 3 lines (Name, Line 1, Line 2)');
+    }
+    
+    // Validate TLE format
+    if (!line1.startsWith('1 ') || !line2.startsWith('2 ')) {
+        throw new Error('Invalid TLE format. Lines must start with "1 " and "2 "');
+    }
+    
+    // Extract NORAD ID from line 1 (columns 3-7)
+    noradId = line1.substring(2, 7).trim();
+    
+    if (!noradId) {
+        throw new Error('Could not extract NORAD ID from TLE data');
+    }
+    
+    return { name, line1, line2, noradId };
+}
+
+// Add event listener for TLE data input to auto-parse
+document.getElementById('satTLEData')?.addEventListener('input', function() {
+    const tleText = this.value;
+    const errorDiv = document.getElementById('satelliteModalError');
+    
+    if (!tleText.trim()) {
+        document.getElementById('satParsedNoradID').value = '';
+        return;
+    }
+    
+    try {
+        const parsed = parseSatelliteTLE(tleText);
+        document.getElementById('satParsedNoradID').value = parsed.noradId;
+        
+        // Auto-fill name if it was parsed and name field is empty or matches old parsed value
+        const nameField = document.getElementById('satName');
+        if (parsed.name && (!nameField.value || nameField.dataset.autofilled === 'true')) {
+            nameField.value = parsed.name;
+            nameField.dataset.autofilled = 'true';
+        }
+        
+        errorDiv.innerHTML = '';
+    } catch (error) {
+        document.getElementById('satParsedNoradID').value = '';
+        // Don't show error while user is still typing
+    }
+});
+
+// Mark manual name changes
+document.getElementById('satName')?.addEventListener('input', function() {
+    if (this.value) {
+        this.dataset.autofilled = 'false';
+    }
+});
+
 document.getElementById('satelliteForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errorDiv = document.getElementById('satelliteModalError');
     errorDiv.innerHTML = '';
 
-    const satelliteData = {
-        noard_id: document.getElementById('satNoardID').value,
-        name: document.getElementById('satName').value,
-        hex_color: document.getElementById('satHexColor').value
-    };
-
+    const tleText = document.getElementById('satTLEData').value;
+    const name = document.getElementById('satName').value;
+    const hexColor = document.getElementById('satHexColor').value;
+    
     try {
+        // Parse TLE data
+        const parsed = parseSatelliteTLE(tleText);
+        
+        const satelliteData = {
+            noard_id: parsed.noradId,
+            name: name,
+            hex_color: hexColor
+        };
+        
+        // Create or update satellite
         if (currentEditId) {
             await apiCall(`/sat/update/${currentEditId}`, {
                 method: 'PUT',
@@ -230,9 +329,24 @@ document.getElementById('satelliteForm').addEventListener('submit', async (e) =>
                 body: JSON.stringify(satelliteData)
             });
         }
+        
+        // Also update TLE data
+        const tleData = [{
+            sat_noard_id: parsed.noradId,
+            time: Math.floor(Date.now() / 1000),
+            line1: parsed.line1,
+            line2: parsed.line2
+        }];
+        
+        await apiCall('/sat/tle/update', {
+            method: 'POST',
+            body: JSON.stringify(tleData)
+        });
 
         closeSatelliteModal();
+        showToast(currentEditId ? 'Satellite updated successfully' : 'Satellite added successfully', 'success');
         loadSatellites();
+        loadTLEs();
     } catch (error) {
         errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
     }
@@ -311,11 +425,38 @@ async function loadSensors() {
     }
 }
 
-function openAddSensorModal() {
+// Load satellites into select dropdown
+async function loadSatellitesIntoSelect() {
+    const selectElement = document.getElementById('senSatelliteSelect');
+    selectElement.innerHTML = '<option value="">Loading...</option>';
+    
+    try {
+        const response = await apiCall('/sat/all');
+        const satellites = response.data || [];
+        
+        selectElement.innerHTML = '<option value="">Select a satellite...</option>';
+        satellites.forEach(sat => {
+            const option = document.createElement('option');
+            option.value = sat.noard_id;
+            option.textContent = `${sat.name} (${sat.noard_id})`;
+            option.dataset.satName = sat.name;
+            selectElement.appendChild(option);
+        });
+    } catch (error) {
+        selectElement.innerHTML = '<option value="">Error loading satellites</option>';
+        console.error('Error loading satellites:', error);
+    }
+}
+
+async function openAddSensorModal() {
     currentEditId = null;
     document.getElementById('sensorModalTitle').textContent = 'Add Sensor';
     document.getElementById('sensorForm').reset();
     document.getElementById('sensorModalError').innerHTML = '';
+    
+    // Load satellites into dropdown
+    await loadSatellitesIntoSelect();
+    
     document.getElementById('sensorModal').classList.add('active');
 }
 
@@ -329,11 +470,13 @@ async function editSensor(id) {
     document.getElementById('sensorModalError').innerHTML = '';
 
     try {
+        // Load satellites into dropdown first
+        await loadSatellitesIntoSelect();
+        
         const response = await apiCall(`/sen/${id}`);
         const sen = response.data;
 
-        document.getElementById('senSatNoardID').value = sen.sat_noard_id;
-        document.getElementById('senSatName').value = sen.sat_name;
+        document.getElementById('senSatelliteSelect').value = sen.sat_noard_id;
         document.getElementById('senName').value = sen.name;
         document.getElementById('senResolution').value = sen.resolution;
         document.getElementById('senWidth').value = sen.width;
@@ -367,9 +510,12 @@ document.getElementById('sensorForm').addEventListener('submit', async (e) => {
     const errorDiv = document.getElementById('sensorModalError');
     errorDiv.innerHTML = '';
 
+    const selectElement = document.getElementById('senSatelliteSelect');
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    
     const sensorData = {
-        sat_noard_id: document.getElementById('senSatNoardID').value,
-        sat_name: document.getElementById('senSatName').value,
+        sat_noard_id: selectElement.value,
+        sat_name: selectedOption.dataset.satName || selectedOption.textContent.split('(')[0].trim(),
         name: document.getElementById('senName').value,
         resolution: parseFloat(document.getElementById('senResolution').value) || 0,
         width: parseFloat(document.getElementById('senWidth').value) || 0,
