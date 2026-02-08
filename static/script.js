@@ -1,5 +1,88 @@
-// API Base URL
-const API_BASE = '/api/v1';
+const TLE_UPDATE_URL = 'https://celestrak.com/NORAD/elements/resource.txt';
+const TLE_CACHE_KEY = 'satplanTLECache';
+const TLE_CACHE_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+const EMBEDDED_TREE_DATA = {
+    id: 0,
+    type: 'root',
+    name: 'Satellites',
+    children: [
+        {
+            id: 1,
+            type: 'satellite',
+            name: 'HJ-1A',
+            hex_color: '#2563eb',
+            sat_norad_id: '33321',
+            tle1: '1 33321U 08041B   26039.21169248  .00002209  00000+0  27521-3 0  9990',
+            tle2: '2 33321  97.6452  33.6805 0034993 246.1151 113.6395 14.83026247939297',
+            children: [
+                {
+                    id: 101,
+                    type: 'sensor',
+                    name: 'CCD1',
+                    hex_color: '#f97316',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 30.0,
+                    init_angle: -14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 102,
+                    type: 'sensor',
+                    name: 'CCD2',
+                    hex_color: '#10b981',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 30.0,
+                    init_angle: 14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                }
+            ]
+        },
+        {
+            id: 2,
+            type: 'satellite',
+            name: 'HJ-1B',
+            hex_color: '#0ea5e9',
+            sat_norad_id: '33320',
+            tle1: '1 33320U 08041A   26039.16302942  .00001368  00000+0  17158-3 0  9993',
+            tle2: '2 33320  97.6601  30.0900 0018300 198.0175 162.0394 14.83620033939272',
+            children: [
+                {
+                    id: 201,
+                    type: 'sensor',
+                    name: 'CCD1',
+                    hex_color: '#c026d3',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30,
+                    init_angle: -14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 202,
+                    type: 'sensor',
+                    name: 'CCD2',
+                    hex_color: '#fbbf24',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30.0,
+                    init_angle: 14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                }
+            ]
+        }
+    ]
+};
 
 // Data storage
 let treeData = null;
@@ -13,6 +96,8 @@ let planningArea = null;
 
 // Satpath WebAssembly module
 let satpathModule = null;
+let satpathReady = false;
+let lastSuccessfulTLEUpdate = null;
 
 // Initialize satpath WASM module
 async function initSatpath() {
@@ -20,8 +105,11 @@ async function initSatpath() {
         console.log('Initializing satpath WebAssembly module...');
         satpathModule = await createModule();
         console.log('Satpath module initialized successfully');
+        satpathReady = true;
+        setDrawButtonState(true);
     } catch (error) {
         console.error('Failed to initialize satpath module:', error);
+        setDrawButtonState(false);
     }
 }
 
@@ -31,7 +119,18 @@ document.addEventListener('DOMContentLoaded', function() {
     initMap();
     loadTreeData();
     initControls();
+    setDrawButtonState(false);
 });
+
+function setDrawButtonState(enabled) {
+    const drawAreaBtn = document.getElementById('drawAreaBtn');
+    if (!drawAreaBtn) {
+        return;
+    }
+
+    drawAreaBtn.disabled = !enabled;
+    drawAreaBtn.classList.toggle('disabled', !enabled);
+}
 
 // Initialize OpenLayers map
 function initMap() {
@@ -145,10 +244,125 @@ function initControls() {
     // Export button
     const exportBtn = document.getElementById('exportBtn');
     exportBtn.addEventListener('click', exportToPDF);
+
+    const refreshTleBtn = document.getElementById('refreshTleBtn');
+    if (refreshTleBtn) {
+        refreshTleBtn.addEventListener('click', function() {
+            refreshTLEData();
+        });
+    }
+}
+
+async function refreshTLEData() {
+    const refreshBtn = document.getElementById('refreshTleBtn');
+    const originalText = refreshBtn ? refreshBtn.textContent : 'Refresh TLE';
+
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Refreshing…';
+    }
+
+    try {
+        showTLEFeedback('Fetching TLE data…', 'info');
+        const response = await fetch(TLE_UPDATE_URL);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const text = await response.text();
+        const records = parseTLEFeed(text);
+
+        if (!records.length) {
+            throw new Error('No TLE records were parsed from the feed');
+        }
+
+        treeData = cloneEmbeddedTree();
+        applyTLERecords(treeData, records);
+
+        const timestamp = Date.now();
+        writeCachedTLE(records, timestamp);
+        lastSuccessfulTLEUpdate = timestamp;
+
+        const preserved = getCheckedSensorIds();
+        renderTree(preserved);
+
+        if (planningArea && isResultsTableVisible()) {
+            refreshResults();
+        }
+
+        updateLastSyncLabel(timestamp);
+        showTLEFeedback('TLE data refreshed successfully', 'success');
+    } catch (error) {
+        console.error('Failed to refresh TLE data:', error);
+        showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = originalText;
+        }
+    }
+}
+
+function parseTLEFeed(text) {
+    const lines = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+    const records = [];
+    let pendingName = '';
+    let i = 0;
+
+    while (i < lines.length) {
+        const line = lines[i];
+
+        if (!line.startsWith('1 ') && !line.startsWith('2 ')) {
+            pendingName = line;
+            i++;
+            continue;
+        }
+
+        if (line.startsWith('1 ') && i + 1 < lines.length && lines[i + 1].startsWith('2 ')) {
+            const line1 = line;
+            const line2 = lines[i + 1];
+            const noradId = line1.substring(2, 7).trim();
+
+            if (noradId) {
+                const name = pendingName && !pendingName.startsWith('1 ') && !pendingName.startsWith('2 ')
+                    ? pendingName
+                    : `NORAD ${noradId}`;
+
+                records.push({ name, line1, line2, noradId });
+            }
+
+            pendingName = '';
+            i += 2;
+            continue;
+        }
+
+        i++;
+    }
+
+    return records;
+}
+
+function writeCachedTLE(records, timestamp) {
+    try {
+        localStorage.setItem(TLE_CACHE_KEY, JSON.stringify({
+            timestamp,
+            records
+        }));
+    } catch (error) {
+        console.warn('Unable to persist TLE cache:', error);
+    }
 }
 
 // Toggle draw mode
 function toggleDrawMode() {
+    if (!satpathReady) {
+        console.warn('Satpath module still loading; please wait before drawing.');
+        return;
+    }
     const drawAreaBtn = document.getElementById('drawAreaBtn');
     const btnIcon = document.getElementById('btnIcon');
     const btnText = document.getElementById('btnText');
@@ -220,33 +434,135 @@ function toggleDrawMode() {
 }
 
 // Load tree data
-async function loadTreeData() {
+function loadTreeData() {
     const loadingEl = document.getElementById('treeLoading');
-    const treeEl = document.getElementById('tree');
-    
-    loadingEl.style.display = 'block';
-    
+    if (loadingEl) {
+        loadingEl.style.display = 'block';
+    }
+
+    treeData = cloneEmbeddedTree();
+    const cache = readCachedTLE();
+    if (cache && cache.records) {
+        applyTLERecords(treeData, cache.records);
+        lastSuccessfulTLEUpdate = cache.timestamp;
+    } else {
+        lastSuccessfulTLEUpdate = null;
+    }
+
+    renderTree();
+
+    if (loadingEl) {
+        loadingEl.style.display = 'none';
+    }
+
+    updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
+}
+
+function cloneEmbeddedTree() {
+    return JSON.parse(JSON.stringify(EMBEDDED_TREE_DATA));
+}
+
+function readCachedTLE() {
     try {
-        const response = await fetch(`${API_BASE}/sat/tree`);
-        const data = await response.json();
-        
-        loadingEl.style.display = 'none';
-        
-        if (data.success && data.data) {
-            treeData = data.data;
-            renderTree();
-        } else {
-            treeEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #EF4444;">Failed to load data</p>';
+        const raw = localStorage.getItem(TLE_CACHE_KEY);
+        if (!raw) {
+            return null;
         }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed.records) || typeof parsed.timestamp !== 'number') {
+            localStorage.removeItem(TLE_CACHE_KEY);
+            return null;
+        }
+
+        return parsed;
     } catch (error) {
-        loadingEl.style.display = 'none';
-        console.error('Error loading tree data:', error);
-        treeEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #EF4444;">Error loading data</p>';
+        console.warn('Invalid TLE cache; clearing stored value', error);
+        localStorage.removeItem(TLE_CACHE_KEY);
+        return null;
     }
 }
 
+function applyTLERecords(node, records) {
+    if (!node || !records || records.length === 0) {
+        return;
+    }
+
+    const recordMap = {};
+    records.forEach(record => {
+        if (record.noradId) {
+            recordMap[record.noradId] = record;
+        }
+    });
+
+    const walk = (current) => {
+        if (current.type === 'satellite' && current.sat_norad_id) {
+            const record = recordMap[current.sat_norad_id];
+            if (record) {
+                current.tle1 = record.line1;
+                current.tle2 = record.line2;
+            }
+        }
+
+        if (Array.isArray(current.children)) {
+            current.children.forEach(child => walk(child));
+        }
+    };
+
+    walk(node);
+}
+
+function updateTLEStatusFromCache(timestamp) {
+    if (!timestamp) {
+        showTLEFeedback('Embedded snapshot is in use. Refresh to fetch live TLEs.', 'info');
+        updateLastSyncLabel(null);
+        return;
+    }
+
+    const stale = isCacheStale(timestamp);
+    const message = stale
+        ? 'Cached TLE data is stale. Refresh when needed.'
+        : 'Cached TLE data is loaded.';
+    const severity = stale ? 'warning' : 'success';
+    showTLEFeedback(message, severity);
+    updateLastSyncLabel(timestamp);
+}
+
+function showTLEFeedback(message, severity = 'info') {
+    const statusEl = document.getElementById('tleStatusMessage');
+    if (!statusEl) {
+        return;
+    }
+
+    statusEl.textContent = message;
+    statusEl.classList.remove('info', 'success', 'error', 'warning');
+    statusEl.classList.add(severity);
+}
+
+function updateLastSyncLabel(timestamp) {
+    const label = document.getElementById('tleLastSync');
+    if (!label) {
+        return;
+    }
+
+    if (!timestamp) {
+        label.textContent = 'Last sync: embedded snapshot';
+        return;
+    }
+
+    label.textContent = `Last sync: ${formatDateTime(new Date(timestamp))} UTC`;
+}
+
+function isCacheStale(timestamp) {
+    if (!timestamp) {
+        return false;
+    }
+
+    return Date.now() - timestamp > TLE_CACHE_MAX_AGE_MS;
+}
+
 // Render tree view
-function renderTree() {
+function renderTree(checkedSensorIds = []) {
     const treeEl = document.getElementById('tree');
     
     if (!treeData) {
@@ -255,6 +571,24 @@ function renderTree() {
     }
     
     treeEl.innerHTML = renderTreeNode(treeData);
+
+    if (checkedSensorIds && checkedSensorIds.length > 0) {
+        restoreCheckedSensors(checkedSensorIds);
+    }
+}
+
+function restoreCheckedSensors(sensorIds) {
+    if (!sensorIds || sensorIds.length === 0) {
+        return;
+    }
+
+    sensorIds.forEach(sensorId => {
+        const checkbox = document.getElementById(`check-sensor-${sensorId}`);
+        if (checkbox) {
+            checkbox.checked = true;
+            updateParentSatelliteState(sensorId);
+        }
+    });
 }
 
 // Render a tree node recursively
@@ -627,6 +961,10 @@ function getCheckedSensors() {
     return sensors;
 }
 
+function getCheckedSensorIds() {
+    return getCheckedSensors().map(sensor => sensor.id);
+}
+
 // Find sensor by ID in tree data
 function findSensorById(node, sensorId) {
     if (node.type === 'sensor' && node.id === sensorId) {
@@ -664,7 +1002,7 @@ function groupSensorsBySatellite(sensors) {
     const groups = {};
     
     sensors.forEach(sensor => {
-        const satNoradId = sensor.sat_noard_id;
+        const satNoradId = sensor.sat_norad_id;
         if (!groups[satNoradId]) {
             // Find the satellite node to get TLE data
             const satNode = findSatelliteByNoradId(treeData, satNoradId);
