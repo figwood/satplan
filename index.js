@@ -689,6 +689,11 @@ export default {
       }
     }
 
+    if (url.pathname === '/admin' || url.pathname === '/admin/') {
+      const adminUrl = new URL('/admin.html', url);
+      return env.ASSETS.fetch(new Request(adminUrl, request));
+    }
+
     // 2. 其他所有请求，交给 [assets] 里的静态文件处理
     // 这会自动寻找 static 目录下的 index.html, styles.css 等
     return env.ASSETS.fetch(request);
