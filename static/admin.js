@@ -1,15 +1,37 @@
 // API configuration (D1-backed endpoints)
 const API_BASE = '/api';
 let currentEditId = null;
-const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+const ADMIN_CREDENTIALS_KEY = 'satplan_admin_credentials';
 
-const getAdminToken = () => localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+const getAdminCredentials = () => {
+    const raw = localStorage.getItem(ADMIN_CREDENTIALS_KEY);
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.username && parsed?.password) {
+            return parsed;
+        }
+    } catch (error) {
+        return null;
+    }
+    return null;
+};
 
-const setAdminToken = (token) => {
-    if (token) {
-        localStorage.setItem(ADMIN_TOKEN_KEY, token);
+const setAdminCredentials = (credentials) => {
+    if (credentials?.username && credentials?.password) {
+        localStorage.setItem(ADMIN_CREDENTIALS_KEY, JSON.stringify(credentials));
     } else {
-        localStorage.removeItem(ADMIN_TOKEN_KEY);
+        localStorage.removeItem(ADMIN_CREDENTIALS_KEY);
+    }
+};
+
+const buildBasicAuthHeader = (username, password) => {
+    try {
+        return `Basic ${btoa(`${username}:${password}`)}`;
+    } catch (error) {
+        return '';
     }
 };
 
@@ -42,15 +64,22 @@ const showAdmin = () => {
     }
 };
 
-const verifyAdminToken = async (token) => {
-    if (!token) {
-        return { ok: false, message: 'Please enter the admin token.' };
+const verifyAdminCredentials = async (credentials) => {
+    const username = credentials?.username?.trim() || '';
+    const password = credentials?.password || '';
+    if (!username || !password) {
+        return { ok: false, message: 'Please enter username and password.' };
+    }
+
+    const authHeader = buildBasicAuthHeader(username, password);
+    if (!authHeader) {
+        return { ok: false, message: 'Unable to build authorization header.' };
     }
 
     try {
         const response = await fetch(`${API_BASE}/admin/auth`, {
             headers: {
-                Authorization: `Bearer ${token}`
+                Authorization: authHeader
             }
         });
 
@@ -70,14 +99,17 @@ const verifyAdminToken = async (token) => {
 
 // API helper function
 async function apiCall(endpoint, options = {}) {
-    const token = getAdminToken();
+    const credentials = getAdminCredentials();
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers
     };
 
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
+    if (credentials?.username && credentials?.password) {
+        const authHeader = buildBasicAuthHeader(credentials.username, credentials.password);
+        if (authHeader) {
+            headers.Authorization = authHeader;
+        }
     }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -94,7 +126,7 @@ async function apiCall(endpoint, options = {}) {
     }
 
     if (response.status === 401) {
-        setAdminToken('');
+        setAdminCredentials(null);
         showLogin('Session expired. Please log in again.');
     }
 
@@ -118,12 +150,14 @@ if (document.readyState === 'loading') {
 
 function initializeAuth() {
     const loginForm = document.getElementById('loginForm');
-    const loginInput = document.getElementById('loginToken');
+    const loginUsername = document.getElementById('loginUsername');
+    const loginPassword = document.getElementById('loginPassword');
 
     if (loginForm) {
         loginForm.addEventListener('submit', async (event) => {
             event.preventDefault();
-            const token = loginInput?.value.trim() || '';
+            const username = loginUsername?.value.trim() || '';
+            const password = loginPassword?.value || '';
 
             const submitButton = loginForm.querySelector('button[type="submit"]');
             if (submitButton) {
@@ -131,9 +165,9 @@ function initializeAuth() {
                 submitButton.textContent = 'Checking...';
             }
 
-            const result = await verifyAdminToken(token);
+            const result = await verifyAdminCredentials({ username, password });
             if (result.ok) {
-                setAdminToken(token);
+                setAdminCredentials({ username, password });
                 showAdmin();
                 loadAllData();
             } else {
@@ -147,14 +181,14 @@ function initializeAuth() {
         });
     }
 
-    const existingToken = getAdminToken();
-    if (existingToken) {
-        verifyAdminToken(existingToken).then((result) => {
+    const existingCredentials = getAdminCredentials();
+    if (existingCredentials) {
+        verifyAdminCredentials(existingCredentials).then((result) => {
             if (result.ok) {
                 showAdmin();
                 loadAllData();
             } else {
-                setAdminToken('');
+                setAdminCredentials(null);
                 showLogin(result.message || 'Authentication failed.');
             }
         });

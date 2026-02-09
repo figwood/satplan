@@ -30,44 +30,89 @@ const readJsonBody = async (request) => {
   }
 };
 
-const extractAdminToken = (request) => {
+const extractBasicCredentials = (request) => {
   const authHeader = request.headers.get('authorization') || '';
-  if (authHeader.toLowerCase().startsWith('bearer ')) {
-    return authHeader.slice(7).trim();
+  if (!authHeader.toLowerCase().startsWith('basic ')) {
+    return null;
   }
 
-  const headerToken = request.headers.get('x-admin-token');
-  if (headerToken) {
-    return headerToken.trim();
+  const encoded = authHeader.slice(6).trim();
+  if (!encoded) {
+    return null;
   }
 
-  const cookieHeader = request.headers.get('cookie') || '';
-  if (cookieHeader) {
-    const cookies = cookieHeader.split(';').map((cookie) => cookie.trim());
-    for (const cookie of cookies) {
-      const [name, ...rest] = cookie.split('=');
-      if (name === 'admin_token') {
-        return rest.join('=').trim();
-      }
+  try {
+    const decoded = atob(encoded);
+    const separatorIndex = decoded.indexOf(':');
+    if (separatorIndex === -1) {
+      return null;
     }
+    const username = decoded.slice(0, separatorIndex).trim();
+    const password = decoded.slice(separatorIndex + 1);
+    if (!username || !password) {
+      return null;
+    }
+    return { username, password };
+  } catch (error) {
+    return null;
   }
-
-  return '';
 };
 
-const getAdminAuthStatus = (request, env) => {
-  const expectedToken = typeof env.ADMIN_TOKEN === 'string' ? env.ADMIN_TOKEN.trim() : '';
-
-  if (!expectedToken) {
-    return { ok: false, status: 500, reason: 'Admin auth is not configured' };
+const extractAdminCredentials = (request) => {
+  const basicCredentials = extractBasicCredentials(request);
+  if (basicCredentials) {
+    return basicCredentials;
   }
 
-  const providedToken = extractAdminToken(request);
-  if (!providedToken || providedToken !== expectedToken) {
+  const username = (request.headers.get('x-admin-username') || '').trim();
+  const password = request.headers.get('x-admin-password') || '';
+  if (username && password) {
+    return { username, password };
+  }
+
+  return null;
+};
+
+const verifyAdminCredentials = async (db, username, password) => {
+  if (!username || !password) {
     return { ok: false, status: 401, reason: 'Unauthorized' };
   }
 
-  return { ok: true };
+  try {
+    const result = await db
+      .prepare('SELECT id, user_name, password, email FROM sys_user WHERE user_name = ?')
+      .bind(username)
+      .all();
+    const user = result.results?.[0];
+    if (!user) {
+      return { ok: false, status: 401, reason: 'Invalid username or password' };
+    }
+
+    const storedPassword = user.password ?? '';
+    if (String(storedPassword) !== String(password)) {
+      return { ok: false, status: 401, reason: 'Invalid username or password' };
+    }
+
+    return {
+      ok: true,
+      user: {
+        id: user.id,
+        username: user.user_name,
+        email: user.email
+      }
+    };
+  } catch (error) {
+    return { ok: false, status: 500, reason: 'Database error' };
+  }
+};
+
+const getAdminAuthStatus = async (request, db) => {
+  const credentials = extractAdminCredentials(request);
+  if (!credentials) {
+    return { ok: false, status: 401, reason: 'Unauthorized' };
+  }
+
+  return verifyAdminCredentials(db, credentials.username, credentials.password);
 };
 
 const parseTleFeed = (text) => {
@@ -304,22 +349,49 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/admin')) {
-      const authStatus = getAdminAuthStatus(request, env);
-      if (!authStatus.ok) {
-        return jsonResponse({ error: authStatus.reason }, authStatus.status);
+      const db = env.SATPLAN_D1;
+      if (!db) {
+        console.error('SATPLAN_D1 binding is missing');
+        return new Response('D1 is not configured', { status: 500 });
+      }
+
+      if (url.pathname === '/api/admin/login') {
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
+
+        const body = await readJsonBody(request);
+        const username = typeof body?.username === 'string' ? body.username.trim() : '';
+        const password = typeof body?.password === 'string' ? body.password : '';
+
+        if (!username || !password) {
+          return jsonResponse({ error: 'Username and password are required' }, 400);
+        }
+
+        const authStatus = await verifyAdminCredentials(db, username, password);
+        if (!authStatus.ok) {
+          return jsonResponse({ error: authStatus.reason }, authStatus.status);
+        }
+
+        return jsonResponse({ ok: true, user: authStatus.user });
       }
 
       if (url.pathname === '/api/admin/auth') {
         if (request.method !== 'GET') {
           return new Response('Method not allowed', { status: 405 });
         }
-        return jsonResponse({ ok: true });
+
+        const authStatus = await getAdminAuthStatus(request, db);
+        if (!authStatus.ok) {
+          return jsonResponse({ error: authStatus.reason }, authStatus.status);
+        }
+
+        return jsonResponse({ ok: true, user: authStatus.user });
       }
 
-      const db = env.SATPLAN_D1;
-      if (!db) {
-        console.error('SATPLAN_D1 binding is missing');
-        return new Response('D1 is not configured', { status: 500 });
+      const authStatus = await getAdminAuthStatus(request, db);
+      if (!authStatus.ok) {
+        return jsonResponse({ error: authStatus.reason }, authStatus.status);
       }
 
       const segments = url.pathname.replace('/api/admin', '').split('/').filter(Boolean);
