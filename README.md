@@ -4,7 +4,7 @@ The SatPlan experience is now delivered as a static OpenLayers planner. The enti
 
 ## What's in this repo
 - `static/index.html` – the single entry point with the satellite tree, controls, and the map surface.
-- `static/script.js` – all the UI logic, including the embedded satellite tree, TLE refresh button, and the localStorage cache guard.
+- `static/script.js` – all the UI logic, including the embedded satellite tree and the localStorage cache guard.
 - `static/styles.css` – the bespoke styles for the planner.
 - `static/tiles/` – pre-generated map tiles. Keep this folder when publishing so the planner can fall back to fast local imagery.
 
@@ -20,8 +20,8 @@ The SatPlan experience is now delivered as a static OpenLayers planner. The enti
 The satellite and sensor hierarchy is still defined inside the `EMBEDDED_TREE_DATA` constant in `static/script.js`, but the UI now prefers the D1-backed catalog described below before falling back to this embedded snapshot. Update or extend the `satellite` entries (NORAD IDs, colors, TLE lines) and their child `sensor` objects (resolutions, observation angles) if you need a quick override or want to test without the API.
 
 ## TLE updates, caching, and status
-- The `Refresh TLE` button now calls the D1-backed `/api/tle/refresh` endpoint, which fetches `https://celestrak.com/NORAD/elements/resource.txt` server-side and stores the resulting TLE rows in the `tle` table.
-- The UI reloads the tree from `/api/satellites` after a refresh and shows the last successful sync time (UTC). The status label turns green when the stored data is fresh, orange when it is older than eight hours, and red when a refresh fails.
+- The planner automatically calls the D1-backed `/api/tle/refresh` endpoint when a planning run starts and the stored TLEs are older than eight hours relative to the planning start time.
+- If the automatic refresh fails, the UI alerts the operator and continues with the latest available data.
 - TLE CRUD now lives in D1: `/api/tle` supports GET/POST/PUT/DELETE, and `/api/tle/status` returns the most recent sync timestamp.
 
 ## Tiles & assets
@@ -33,4 +33,4 @@ Keep `static/tiles/` in the deployment bundle so OpenLayers can load the bundled
 ## Deploying to Cloudflare
 1. Build or bundle your `static/` directory (including `index.html`, `script.js`, `styles.css`, and `tiles/`). The Pages preview now also runs the `functions/api/satellites.js` handler, so you can run `wrangler pages dev static --local` from the repo root to exercise the D1-backed tree while developing.
 2. Push those files to Cloudflare Pages or reference them from a Cloudflare Worker. No backend service or database is required anymore—just serve the static files over HTTPS. Make sure the `SATPLAN_D1` binding in `wrangler.toml` points at your D1 database and that the schema from `satplan.sql` is imported into that database before publishing.
-3. Keep the `Refresh TLE` button handy in production so operators can refresh the orbital data without touching a backend.
+3. Ensure the `/api/tle/refresh` endpoint is reachable in production so the planner can automatically keep orbital data current.

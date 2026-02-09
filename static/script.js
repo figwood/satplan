@@ -269,25 +269,15 @@ function initControls() {
     const exportBtn = document.getElementById('exportBtn');
     exportBtn.addEventListener('click', exportToPDF);
 
-    const refreshTleBtn = document.getElementById('refreshTleBtn');
-    if (refreshTleBtn) {
-        refreshTleBtn.addEventListener('click', function() {
-            refreshTLEData();
-        });
-    }
+    // TLE refresh is now automatic during planning
 }
 
-async function refreshTLEData() {
-    const refreshBtn = document.getElementById('refreshTleBtn');
-    const originalText = refreshBtn ? refreshBtn.textContent : 'Refresh TLE';
-
-    if (refreshBtn) {
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = 'Refreshing…';
-    }
-
+async function refreshTLEData(options = {}) {
+    const { notifyOnError = false, showStatus = false } = options;
     try {
-        showTLEFeedback('Refreshing TLE data…', 'info');
+        if (showStatus) {
+            showTLEFeedback('Refreshing TLE data…', 'info');
+        }
         const response = await fetch('/api/tle/refresh', {
             method: 'POST',
             headers: {
@@ -321,17 +311,37 @@ async function refreshTLEData() {
             refreshResults();
         }
 
-        updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
-        showTLEFeedback('TLE data refreshed successfully', 'success');
+        if (showStatus) {
+            updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
+            showTLEFeedback('TLE data refreshed successfully', 'success');
+        }
+        return true;
     } catch (error) {
         console.error('Failed to refresh TLE data:', error);
-        showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
-    } finally {
-        if (refreshBtn) {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = originalText;
+        if (showStatus) {
+            showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
         }
+        if (notifyOnError) {
+            alert(`TLE 自动更新失败：${error.message}`);
+        }
+        return false;
     }
+}
+
+async function ensureTLEFreshForPlanning(planningStartMs) {
+    const planTime = typeof planningStartMs === 'number' ? planningStartMs : Date.now();
+    const lastSync = typeof lastSuccessfulTLEUpdate === 'number' ? lastSuccessfulTLEUpdate : null;
+
+    if (!lastSync) {
+        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+    }
+
+    const isStaleForPlan = planTime - lastSync > TLE_CACHE_MAX_AGE_MS;
+    if (isStaleForPlan) {
+        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+    }
+
+    return true;
 }
 
 // Toggle draw mode
@@ -858,6 +868,8 @@ async function callSensorInRegion(area) {
         const utcEndDate = new Date(utcStartDate.getTime() + planningDays * 24 * 60 * 60 * 1000);
         const utcStartTime = Math.floor(utcStartDate.getTime() / 1000);
         const utcEndTime = Math.floor(utcEndDate.getTime() / 1000);
+
+        await ensureTLEFreshForPlanning(utcStartDate.getTime());
         
         // For each satellite with checked sensors, compute regions
         const satelliteGroups = groupSensorsBySatellite(checkedSensors);
