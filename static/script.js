@@ -96,7 +96,7 @@ const EMBEDDED_TREE_DATA = {
                     id: 203,
                     type: 'sensor',
                     name: 'IRS',
-                    hex_color: '#ffbf24',
+                    hex_color: '#a4ff2e',
                     sat_norad_id: '33320',
                     sat_name: 'HJ-1B',
                     resolution: 30.0,
