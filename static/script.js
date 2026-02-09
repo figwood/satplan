@@ -91,6 +91,19 @@ const EMBEDDED_TREE_DATA = {
                     left_side_angle: 0.0,
                     cur_side_angle: 0.0,
                     observe_angle: 30.0
+                },
+                {
+                    id: 203,
+                    type: 'sensor',
+                    name: 'IRS',
+                    hex_color: '#ffbf24',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30.0,
+                    init_angle: 0.0,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 60.0
                 }
             ]
         }
