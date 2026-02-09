@@ -1,5 +1,3 @@
-const TLE_UPDATE_URL = 'https://celestrak.com/NORAD/elements/resource.txt';
-const TLE_CACHE_KEY = 'satplanTLECache';
 const TLE_CACHE_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 const EMBEDDED_TREE_DATA = {
@@ -289,25 +287,32 @@ async function refreshTLEData() {
     }
 
     try {
-        showTLEFeedback('Fetching TLE data…', 'info');
-        const response = await fetch(TLE_UPDATE_URL);
+        showTLEFeedback('Refreshing TLE data…', 'info');
+        const response = await fetch('/api/tle/refresh', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({ source: 'celestrak' })
+        });
+
         if (!response.ok) {
             throw new Error(`HTTP ${response.status} ${response.statusText}`);
         }
 
-        const text = await response.text();
-        const records = parseTLEFeed(text);
+        const payload = await response.json();
+        const timestamp = typeof payload?.timestamp === 'number' ? payload.timestamp : null;
 
-        if (!records.length) {
-            throw new Error('No TLE records were parsed from the feed');
+        const fetched = await fetchTreeFromD1();
+        if (fetched && fetched.tree) {
+            treeData = fetched.tree;
         }
 
-        treeData = cloneEmbeddedTree();
-        applyTLERecords(treeData, records);
-
-        const timestamp = Date.now();
-        writeCachedTLE(records, timestamp);
-        lastSuccessfulTLEUpdate = timestamp;
+        if (typeof fetched?.tleLastSync === 'number') {
+            lastSuccessfulTLEUpdate = fetched.tleLastSync;
+        } else if (timestamp) {
+            lastSuccessfulTLEUpdate = timestamp;
+        }
 
         const preserved = getCheckedSensorIds();
         renderTree(preserved);
@@ -316,7 +321,7 @@ async function refreshTLEData() {
             refreshResults();
         }
 
-        updateLastSyncLabel(timestamp);
+        updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
         showTLEFeedback('TLE data refreshed successfully', 'success');
     } catch (error) {
         console.error('Failed to refresh TLE data:', error);
@@ -326,60 +331,6 @@ async function refreshTLEData() {
             refreshBtn.disabled = false;
             refreshBtn.textContent = originalText;
         }
-    }
-}
-
-function parseTLEFeed(text) {
-    const lines = text
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-    const records = [];
-    let pendingName = '';
-    let i = 0;
-
-    while (i < lines.length) {
-        const line = lines[i];
-
-        if (!line.startsWith('1 ') && !line.startsWith('2 ')) {
-            pendingName = line;
-            i++;
-            continue;
-        }
-
-        if (line.startsWith('1 ') && i + 1 < lines.length && lines[i + 1].startsWith('2 ')) {
-            const line1 = line;
-            const line2 = lines[i + 1];
-            const noradId = line1.substring(2, 7).trim();
-
-            if (noradId) {
-                const name = pendingName && !pendingName.startsWith('1 ') && !pendingName.startsWith('2 ')
-                    ? pendingName
-                    : `NORAD ${noradId}`;
-
-                records.push({ name, line1, line2, noradId });
-            }
-
-            pendingName = '';
-            i += 2;
-            continue;
-        }
-
-        i++;
-    }
-
-    return records;
-}
-
-function writeCachedTLE(records, timestamp) {
-    try {
-        localStorage.setItem(TLE_CACHE_KEY, JSON.stringify({
-            timestamp,
-            records
-        }));
-    } catch (error) {
-        console.warn('Unable to persist TLE cache:', error);
     }
 }
 
@@ -467,13 +418,11 @@ async function loadTreeData() {
     }
 
     const fetchedTree = await fetchTreeFromD1();
-    treeData = fetchedTree || cloneEmbeddedTree();
-
-    const cache = readCachedTLE();
-    if (cache && cache.records) {
-        applyTLERecords(treeData, cache.records);
-        lastSuccessfulTLEUpdate = cache.timestamp;
+    if (fetchedTree && fetchedTree.tree) {
+        treeData = fetchedTree.tree;
+        lastSuccessfulTLEUpdate = fetchedTree.tleLastSync ?? null;
     } else {
+        treeData = cloneEmbeddedTree();
         lastSuccessfulTLEUpdate = null;
     }
 
@@ -499,7 +448,10 @@ async function fetchTreeFromD1() {
 
         const payload = await response.json();
         if (payload && payload.tree && payload.tree.type === 'root') {
-            return payload.tree;
+            return {
+                tree: payload.tree,
+                tleLastSync: typeof payload.tleLastSync === 'number' ? payload.tleLastSync : null
+            };
         }
 
         console.warn('SatPlan: unexpected payload from D1 API');
@@ -508,27 +460,6 @@ async function fetchTreeFromD1() {
     }
 
     return null;
-}
-
-function readCachedTLE() {
-    try {
-        const raw = localStorage.getItem(TLE_CACHE_KEY);
-        if (!raw) {
-            return null;
-        }
-
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed.records) || typeof parsed.timestamp !== 'number') {
-            localStorage.removeItem(TLE_CACHE_KEY);
-            return null;
-        }
-
-        return parsed;
-    } catch (error) {
-        console.warn('Invalid TLE cache; clearing stored value', error);
-        localStorage.removeItem(TLE_CACHE_KEY);
-        return null;
-    }
 }
 
 function applyTLERecords(node, records) {
@@ -569,8 +500,8 @@ function updateTLEStatusFromCache(timestamp) {
 
     const stale = isCacheStale(timestamp);
     const message = stale
-        ? 'Cached TLE data is stale. Refresh when needed.'
-        : 'Cached TLE data is loaded.';
+        ? 'Stored TLE data is stale. Refresh when needed.'
+        : 'Stored TLE data is loaded.';
     const severity = stale ? 'warning' : 'success';
     showTLEFeedback(message, severity);
     updateLastSyncLabel(timestamp);
