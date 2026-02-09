@@ -93,8 +93,20 @@ export default {
             return jsonResponse({ error: 'No TLE records were parsed from the feed' }, 400);
           }
 
+          const satelliteIdsResult = await db.prepare('SELECT noard_id FROM satellite WHERE noard_id IS NOT NULL').all();
+          const allowedIds = new Set(
+            (satelliteIdsResult.results || [])
+              .map((row) => normalizeNoradId(row.noard_id))
+              .filter((id) => id)
+          );
+
+          const filteredRecords = records.filter((record) => allowedIds.has(normalizeNoradId(record.noradId)));
+          if (!filteredRecords.length) {
+            return jsonResponse({ error: 'No matching satellites for TLE refresh' }, 400);
+          }
+
           const timestamp = Math.floor(Date.now() / 1000);
-          const statements = records.map((record) =>
+          const statements = filteredRecords.map((record) =>
             db
               .prepare('INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)')
               .bind(record.noradId, timestamp, record.line1, record.line2)
@@ -103,7 +115,7 @@ export default {
           await db.batch(statements);
 
           return jsonResponse({
-            count: records.length,
+            count: filteredRecords.length,
             timestamp: timestamp * 1000
           });
         } catch (error) {
