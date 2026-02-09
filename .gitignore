@@ -54,3 +54,4 @@ satplan
 *.db
 tiles
 data_bak
+*.sql

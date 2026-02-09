@@ -1,5 +1,13 @@
 name = 'calm-wave-3f68'
 compatibility_date = "2024-04-01"
+type = "javascript"
+
+[functions]
+directory = "./functions"
 
 [assets]
-directory = "./static"  
+directory = "./static"
+
+[[d1_databases]]
+binding = "SATPLAN_D1"
+database_name = "satplan"

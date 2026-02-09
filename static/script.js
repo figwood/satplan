@@ -460,13 +460,15 @@ function toggleDrawMode() {
 }
 
 // Load tree data
-function loadTreeData() {
+async function loadTreeData() {
     const loadingEl = document.getElementById('treeLoading');
     if (loadingEl) {
         loadingEl.style.display = 'block';
     }
 
-    treeData = cloneEmbeddedTree();
+    const fetchedTree = await fetchTreeFromD1();
+    treeData = fetchedTree || cloneEmbeddedTree();
+
     const cache = readCachedTLE();
     if (cache && cache.records) {
         applyTLERecords(treeData, cache.records);
@@ -486,6 +488,26 @@ function loadTreeData() {
 
 function cloneEmbeddedTree() {
     return JSON.parse(JSON.stringify(EMBEDDED_TREE_DATA));
+}
+
+async function fetchTreeFromD1() {
+    try {
+        const response = await fetch('/api/satellites', { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const payload = await response.json();
+        if (payload && payload.tree && payload.tree.type === 'root') {
+            return payload.tree;
+        }
+
+        console.warn('SatPlan: unexpected payload from D1 API');
+    } catch (error) {
+        console.error('SatPlan: failed to fetch tree data from D1', error);
+    }
+
+    return null;
 }
 
 function readCachedTLE() {
