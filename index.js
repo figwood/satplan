@@ -22,6 +22,14 @@ const jsonResponse = (payload, status = 200) =>
     }
   });
 
+const readJsonBody = async (request) => {
+  try {
+    return await request.json();
+  } catch (error) {
+    return null;
+  }
+};
+
 const parseTleFeed = (text) => {
   const lines = text
     .split(/\r?\n/)
@@ -247,6 +255,333 @@ export default {
             console.error('TLE delete error', error);
             return jsonResponse({ error: 'Failed to delete TLE record' }, 500);
           }
+        }
+
+        return new Response('Method not allowed', { status: 405 });
+      }
+
+      return new Response('Not found', { status: 404 });
+    }
+
+    if (url.pathname.startsWith('/api/admin')) {
+      const db = env.SATPLAN_D1;
+      if (!db) {
+        console.error('SATPLAN_D1 binding is missing');
+        return new Response('D1 is not configured', { status: 500 });
+      }
+
+      const segments = url.pathname.replace('/api/admin', '').split('/').filter(Boolean);
+      const resource = segments[0];
+      const id = segments[1] ? Number(segments[1]) : null;
+
+      if (segments.length > 2 || !resource) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      if (resource === 'satellites') {
+        if (request.method === 'GET') {
+          if (id) {
+            const result = await db
+              .prepare('SELECT id, noard_id, name, hex_color FROM satellite WHERE id = ?')
+              .bind(id)
+              .all();
+            const sat = result.results?.[0];
+            if (!sat) {
+              return jsonResponse({ error: 'Satellite not found' }, 404);
+            }
+            return jsonResponse({ result: sat });
+          }
+
+          const listResult = await db
+            .prepare('SELECT id, noard_id, name, hex_color FROM satellite ORDER BY id')
+            .all();
+          return jsonResponse({ results: listResult.results || [] });
+        }
+
+        if (request.method === 'POST') {
+          const body = await readJsonBody(request);
+          const noardId = normalizeNoradId(body?.noard_id);
+          const name = typeof body?.name === 'string' ? body.name.trim() : '';
+          const hexColor = typeof body?.hex_color === 'string' ? body.hex_color.trim() : null;
+
+          if (!noardId) {
+            return jsonResponse({ error: 'noard_id is required' }, 400);
+          }
+
+          const result = await db
+            .prepare('INSERT INTO satellite (noard_id, name, hex_color) VALUES (?, ?, ?)')
+            .bind(noardId, name, hexColor)
+            .run();
+
+          return jsonResponse({ id: result.lastRowId });
+        }
+
+        if (request.method === 'PUT') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          const body = await readJsonBody(request);
+          const fields = [];
+          const params = [];
+
+          if (typeof body?.noard_id === 'string') {
+            fields.push('noard_id = ?');
+            params.push(normalizeNoradId(body.noard_id));
+          }
+          if (typeof body?.name === 'string') {
+            fields.push('name = ?');
+            params.push(body.name.trim());
+          }
+          if (typeof body?.hex_color === 'string') {
+            fields.push('hex_color = ?');
+            params.push(body.hex_color.trim());
+          }
+
+          if (!fields.length) {
+            return jsonResponse({ error: 'No fields to update' }, 400);
+          }
+
+          params.push(id);
+          await db.prepare(`UPDATE satellite SET ${fields.join(', ')} WHERE id = ?`).bind(...params).run();
+          return jsonResponse({ updated: true });
+        }
+
+        if (request.method === 'DELETE') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          const satResult = await db
+            .prepare('SELECT noard_id FROM satellite WHERE id = ?')
+            .bind(id)
+            .all();
+          const satNoardId = satResult.results?.[0]?.noard_id;
+          if (!satNoardId) {
+            return jsonResponse({ error: 'Satellite not found' }, 404);
+          }
+
+          await db.batch([
+            db.prepare('DELETE FROM sensor WHERE sat_noard_id = ?').bind(satNoardId),
+            db.prepare('DELETE FROM tle WHERE sat_noard_id = ?').bind(satNoardId),
+            db.prepare('DELETE FROM satellite WHERE id = ?').bind(id)
+          ]);
+
+          return jsonResponse({ deleted: true });
+        }
+
+        return new Response('Method not allowed', { status: 405 });
+      }
+
+      if (resource === 'sensors') {
+        if (request.method === 'GET') {
+          if (id) {
+            const result = await db
+              .prepare(
+                'SELECT id, sat_noard_id, sat_name, name, resolution, width, right_side_angle, left_side_angle, observe_angle, hex_color, init_angle FROM sensor WHERE id = ?'
+              )
+              .bind(id)
+              .all();
+            const sensor = result.results?.[0];
+            if (!sensor) {
+              return jsonResponse({ error: 'Sensor not found' }, 404);
+            }
+            return jsonResponse({ result: sensor });
+          }
+
+          const listResult = await db
+            .prepare(
+              'SELECT id, sat_noard_id, sat_name, name, resolution, width, right_side_angle, left_side_angle, observe_angle, hex_color, init_angle FROM sensor ORDER BY id'
+            )
+            .all();
+          return jsonResponse({ results: listResult.results || [] });
+        }
+
+        if (request.method === 'POST') {
+          const body = await readJsonBody(request);
+          const satNoardId = normalizeNoradId(body?.sat_noard_id);
+          const satName = typeof body?.sat_name === 'string' ? body.sat_name.trim() : '';
+          const name = typeof body?.name === 'string' ? body.name.trim() : '';
+
+          if (!satNoardId || !name) {
+            return jsonResponse({ error: 'sat_noard_id and name are required' }, 400);
+          }
+
+          const resolution = Number.isFinite(body?.resolution) ? body.resolution : 0;
+          const width = Number.isFinite(body?.width) ? body.width : 0;
+          const rightSideAngle = Number.isFinite(body?.right_side_angle) ? body.right_side_angle : 0;
+          const leftSideAngle = Number.isFinite(body?.left_side_angle) ? body.left_side_angle : 0;
+          const observeAngle = Number.isFinite(body?.observe_angle) ? body.observe_angle : 0;
+          const initAngle = Number.isFinite(body?.init_angle) ? body.init_angle : 0;
+          const hexColor = typeof body?.hex_color === 'string' ? body.hex_color.trim() : null;
+
+          const result = await db
+            .prepare(
+              'INSERT INTO sensor (sat_noard_id, sat_name, name, resolution, width, right_side_angle, left_side_angle, observe_angle, hex_color, init_angle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            )
+            .bind(
+              satNoardId,
+              satName,
+              name,
+              resolution,
+              width,
+              rightSideAngle,
+              leftSideAngle,
+              observeAngle,
+              hexColor,
+              initAngle
+            )
+            .run();
+
+          return jsonResponse({ id: result.lastRowId });
+        }
+
+        if (request.method === 'PUT') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          const body = await readJsonBody(request);
+          const fields = [];
+          const params = [];
+
+          if (typeof body?.sat_noard_id === 'string') {
+            fields.push('sat_noard_id = ?');
+            params.push(normalizeNoradId(body.sat_noard_id));
+          }
+          if (typeof body?.sat_name === 'string') {
+            fields.push('sat_name = ?');
+            params.push(body.sat_name.trim());
+          }
+          if (typeof body?.name === 'string') {
+            fields.push('name = ?');
+            params.push(body.name.trim());
+          }
+          if (Number.isFinite(body?.resolution)) {
+            fields.push('resolution = ?');
+            params.push(body.resolution);
+          }
+          if (Number.isFinite(body?.width)) {
+            fields.push('width = ?');
+            params.push(body.width);
+          }
+          if (Number.isFinite(body?.right_side_angle)) {
+            fields.push('right_side_angle = ?');
+            params.push(body.right_side_angle);
+          }
+          if (Number.isFinite(body?.left_side_angle)) {
+            fields.push('left_side_angle = ?');
+            params.push(body.left_side_angle);
+          }
+          if (Number.isFinite(body?.observe_angle)) {
+            fields.push('observe_angle = ?');
+            params.push(body.observe_angle);
+          }
+          if (typeof body?.hex_color === 'string') {
+            fields.push('hex_color = ?');
+            params.push(body.hex_color.trim());
+          }
+          if (Number.isFinite(body?.init_angle)) {
+            fields.push('init_angle = ?');
+            params.push(body.init_angle);
+          }
+
+          if (!fields.length) {
+            return jsonResponse({ error: 'No fields to update' }, 400);
+          }
+
+          params.push(id);
+          await db.prepare(`UPDATE sensor SET ${fields.join(', ')} WHERE id = ?`).bind(...params).run();
+          return jsonResponse({ updated: true });
+        }
+
+        if (request.method === 'DELETE') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          await db.prepare('DELETE FROM sensor WHERE id = ?').bind(id).run();
+          return jsonResponse({ deleted: true });
+        }
+
+        return new Response('Method not allowed', { status: 405 });
+      }
+
+      if (resource === 'tle-sites') {
+        if (request.method === 'GET') {
+          if (id) {
+            const result = await db
+              .prepare('SELECT id, site, url, description FROM tle_site WHERE id = ?')
+              .bind(id)
+              .all();
+            const site = result.results?.[0];
+            if (!site) {
+              return jsonResponse({ error: 'TLE site not found' }, 404);
+            }
+            return jsonResponse({ result: site });
+          }
+
+          const listResult = await db
+            .prepare('SELECT id, site, url, description FROM tle_site ORDER BY id')
+            .all();
+          return jsonResponse({ results: listResult.results || [] });
+        }
+
+        if (request.method === 'POST') {
+          const body = await readJsonBody(request);
+          const site = typeof body?.site === 'string' ? body.site.trim() : '';
+          const urlValue = typeof body?.url === 'string' ? body.url.trim() : '';
+          const description = typeof body?.description === 'string' ? body.description.trim() : '';
+
+          if (!site || !urlValue) {
+            return jsonResponse({ error: 'site and url are required' }, 400);
+          }
+
+          const result = await db
+            .prepare('INSERT INTO tle_site (site, url, description) VALUES (?, ?, ?)')
+            .bind(site, urlValue, description)
+            .run();
+          return jsonResponse({ id: result.lastRowId });
+        }
+
+        if (request.method === 'PUT') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          const body = await readJsonBody(request);
+          const fields = [];
+          const params = [];
+
+          if (typeof body?.site === 'string') {
+            fields.push('site = ?');
+            params.push(body.site.trim());
+          }
+          if (typeof body?.url === 'string') {
+            fields.push('url = ?');
+            params.push(body.url.trim());
+          }
+          if (typeof body?.description === 'string') {
+            fields.push('description = ?');
+            params.push(body.description.trim());
+          }
+
+          if (!fields.length) {
+            return jsonResponse({ error: 'No fields to update' }, 400);
+          }
+
+          params.push(id);
+          await db.prepare(`UPDATE tle_site SET ${fields.join(', ')} WHERE id = ?`).bind(...params).run();
+          return jsonResponse({ updated: true });
+        }
+
+        if (request.method === 'DELETE') {
+          if (!Number.isFinite(id)) {
+            return jsonResponse({ error: 'id is required' }, 400);
+          }
+
+          await db.prepare('DELETE FROM tle_site WHERE id = ?').bind(id).run();
+          return jsonResponse({ deleted: true });
         }
 
         return new Response('Method not allowed', { status: 405 });
