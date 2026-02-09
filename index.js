@@ -30,6 +30,46 @@ const readJsonBody = async (request) => {
   }
 };
 
+const extractAdminToken = (request) => {
+  const authHeader = request.headers.get('authorization') || '';
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+
+  const headerToken = request.headers.get('x-admin-token');
+  if (headerToken) {
+    return headerToken.trim();
+  }
+
+  const cookieHeader = request.headers.get('cookie') || '';
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(';').map((cookie) => cookie.trim());
+    for (const cookie of cookies) {
+      const [name, ...rest] = cookie.split('=');
+      if (name === 'admin_token') {
+        return rest.join('=').trim();
+      }
+    }
+  }
+
+  return '';
+};
+
+const getAdminAuthStatus = (request, env) => {
+  const expectedToken = typeof env.ADMIN_TOKEN === 'string' ? env.ADMIN_TOKEN.trim() : '';
+
+  if (!expectedToken) {
+    return { ok: false, status: 500, reason: 'Admin auth is not configured' };
+  }
+
+  const providedToken = extractAdminToken(request);
+  if (!providedToken || providedToken !== expectedToken) {
+    return { ok: false, status: 401, reason: 'Unauthorized' };
+  }
+
+  return { ok: true };
+};
+
 const parseTleFeed = (text) => {
   const lines = text
     .split(/\r?\n/)
@@ -264,6 +304,18 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/admin')) {
+      const authStatus = getAdminAuthStatus(request, env);
+      if (!authStatus.ok) {
+        return jsonResponse({ error: authStatus.reason }, authStatus.status);
+      }
+
+      if (url.pathname === '/api/admin/auth') {
+        if (request.method !== 'GET') {
+          return new Response('Method not allowed', { status: 405 });
+        }
+        return jsonResponse({ ok: true });
+      }
+
       const db = env.SATPLAN_D1;
       if (!db) {
         console.error('SATPLAN_D1 binding is missing');

@@ -1,13 +1,84 @@
 // API configuration (D1-backed endpoints)
 const API_BASE = '/api';
 let currentEditId = null;
+const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+
+const getAdminToken = () => localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+
+const setAdminToken = (token) => {
+    if (token) {
+        localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    } else {
+        localStorage.removeItem(ADMIN_TOKEN_KEY);
+    }
+};
+
+const showLogin = (message = '') => {
+    const loginPanel = document.getElementById('loginPanel');
+    const adminPanel = document.getElementById('adminPanel');
+    const loginError = document.getElementById('loginError');
+
+    if (adminPanel) {
+        adminPanel.classList.add('hidden');
+    }
+    if (loginPanel) {
+        loginPanel.classList.remove('hidden');
+    }
+    if (loginError) {
+        loginError.textContent = message;
+        loginError.style.display = message ? 'block' : 'none';
+    }
+};
+
+const showAdmin = () => {
+    const loginPanel = document.getElementById('loginPanel');
+    const adminPanel = document.getElementById('adminPanel');
+
+    if (loginPanel) {
+        loginPanel.classList.add('hidden');
+    }
+    if (adminPanel) {
+        adminPanel.classList.remove('hidden');
+    }
+};
+
+const verifyAdminToken = async (token) => {
+    if (!token) {
+        return { ok: false, message: 'Please enter the admin token.' };
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/admin/auth`, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            return {
+                ok: false,
+                message: payload?.error || 'Authentication failed.'
+            };
+        }
+
+        return { ok: true };
+    } catch (error) {
+        return { ok: false, message: 'Unable to reach the admin API.' };
+    }
+};
 
 // API helper function
 async function apiCall(endpoint, options = {}) {
+    const token = getAdminToken();
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers
     };
+
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
@@ -22,6 +93,11 @@ async function apiCall(endpoint, options = {}) {
         data = { message: rawText };
     }
 
+    if (response.status === 401) {
+        setAdminToken('');
+        showLogin('Session expired. Please log in again.');
+    }
+
     if (!response.ok) {
         throw new Error(data?.error || data?.message || 'API request failed');
     }
@@ -31,13 +107,60 @@ async function apiCall(endpoint, options = {}) {
 
 // Initial load
 const startAdmin = () => {
-    loadAllData();
+    initializeAuth();
 };
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startAdmin);
 } else {
     startAdmin();
+}
+
+function initializeAuth() {
+    const loginForm = document.getElementById('loginForm');
+    const loginInput = document.getElementById('loginToken');
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const token = loginInput?.value.trim() || '';
+
+            const submitButton = loginForm.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Checking...';
+            }
+
+            const result = await verifyAdminToken(token);
+            if (result.ok) {
+                setAdminToken(token);
+                showAdmin();
+                loadAllData();
+            } else {
+                showLogin(result.message || 'Authentication failed.');
+            }
+
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Login';
+            }
+        });
+    }
+
+    const existingToken = getAdminToken();
+    if (existingToken) {
+        verifyAdminToken(existingToken).then((result) => {
+            if (result.ok) {
+                showAdmin();
+                loadAllData();
+            } else {
+                setAdminToken('');
+                showLogin(result.message || 'Authentication failed.');
+            }
+        });
+    } else {
+        showLogin();
+    }
 }
 
 // Tab switching

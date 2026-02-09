@@ -28,6 +28,10 @@
             padding: 30px;
         }
 
+        .hidden {
+            display: none;
+        }
+
         .header {
             text-align: center;
             margin-bottom: 30px;
@@ -349,8 +353,21 @@
     </style>
 </head>
 <body>
+    <!-- Login Panel -->
+    <div id="loginPanel" class="login-container">
+        <h2>Admin Login</h2>
+        <div id="loginError" class="error" style="display: none;"></div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="loginToken">Access Token</label>
+                <input type="password" id="loginToken" placeholder="Enter admin token" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+        </form>
+    </div>
+
     <!-- Main Admin Panel -->
-    <div id="adminPanel" class="container">
+    <div id="adminPanel" class="container hidden">
         <div class="header">
             <h1>🛰️ SatPlan Admin</h1>
             <p>Manage Satellites, Sensors & TLE Data</p>
