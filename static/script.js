@@ -41,6 +41,19 @@ const EMBEDDED_TREE_DATA = {
                     left_side_angle: 0.0,
                     cur_side_angle: 0.0,
                     observe_angle: 30.0
+                },
+                {
+                    id: 103,
+                    type: 'sensor',
+                    name: 'HSI',
+                    hex_color: '#1fee81',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 10.0,
+                    init_angle: 0.0,
+                    left_side_angle: 30.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 4.5
                 }
             ]
         },
