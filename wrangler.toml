@@ -11,3 +11,4 @@ directory = "./static"
 [[d1_databases]]
 binding = "SATPLAN_D1"
 database_name = "satplan"
+database_id = "6a636ab2-2639-441c-8498-9ede26a394c2"
