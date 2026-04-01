@@ -1,0 +1,50 @@
+replicaCount: 1
+
+image:
+  repository: satplan
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: satplan.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# SatPlan currently uses SQLite. Keep replicaCount=1 unless you switch to a shared DB.
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClassName: ""
+
+jwt:
+  # When existingSecret is empty, chart will create a Secret and use this value.
+  secret: "change-me-in-production"
+  existingSecret: ""
+  secretKey: JWT_SECRET
+
+env:
+  port: "8080"
+  dbPath: /root/data/satplan.db
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

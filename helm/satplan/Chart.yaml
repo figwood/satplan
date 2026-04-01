@@ -1,0 +1,6 @@
+apiVersion: v2
+name: satplan
+description: Helm chart for SatPlan satellite planning system
+type: application
+version: 0.1.0
+appVersion: "latest"

@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-satplan
+/satplan
 
 # Test binary, built with `go test -c`
 *.test
@@ -50,7 +50,6 @@ uploads/
 
 # Log files
 *.log
-satplan
 *.db
 tiles
 data_bak

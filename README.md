@@ -227,6 +227,117 @@ Benefits:
 - Minimal dependencies
 - Easy to scale
 
+## Helm Chart (Kubernetes)
+
+This repository now includes a Helm chart at `helm/satplan`.
+
+### Chart Contents
+
+- `templates/deployment.yaml` - Deploys the SatPlan container
+- `templates/service.yaml` - Exposes the app on port `8080`
+- `templates/pvc.yaml` - Persists SQLite data under `/root/data`
+- `templates/secret.yaml` - Stores `JWT_SECRET`
+- `templates/ingress.yaml` - Optional Ingress support
+- `values.yaml` - Central place for deployment configuration
+
+### Important Values
+
+- `image.repository` / `image.tag` - Container image used by the deployment
+- `replicaCount` - Number of pods (keep `1` for SQLite)
+- `persistence.enabled` - Enable persistent storage for `/root/data`
+- `persistence.size` - PVC size for SQLite data
+- `jwt.secret` - JWT secret (change this in production)
+- `jwt.existingSecret` - Use an existing Kubernetes Secret instead of creating one
+- `ingress.enabled` - Enable/disable Ingress creation
+
+## Deploy to Kubernetes with Helm
+
+### 1. Build and push image
+
+```bash
+# Example image name
+export IMAGE_REPO=ghcr.io/<your-org>/satplan
+export IMAGE_TAG=v1.0.0
+
+docker build -t ${IMAGE_REPO}:${IMAGE_TAG} .
+docker push ${IMAGE_REPO}:${IMAGE_TAG}
+```
+
+### 2. Create namespace
+
+```bash
+kubectl create namespace satplan
+```
+
+### 3. (Recommended) Create JWT secret manually
+
+If you prefer managing the secret yourself, create it and set `jwt.existingSecret`:
+
+```bash
+kubectl -n satplan create secret generic satplan-jwt \
+  --from-literal=JWT_SECRET='replace-with-strong-secret'
+```
+
+### 4. Install chart
+
+```bash
+helm upgrade --install satplan ./helm/satplan \
+  -n satplan \
+  --set image.repository=${IMAGE_REPO} \
+  --set image.tag=${IMAGE_TAG} \
+  --set jwt.existingSecret=satplan-jwt
+```
+
+If you want the chart to create the Secret automatically, remove `jwt.existingSecret` and set `jwt.secret` instead:
+
+```bash
+helm upgrade --install satplan ./helm/satplan \
+  -n satplan \
+  --set image.repository=${IMAGE_REPO} \
+  --set image.tag=${IMAGE_TAG} \
+  --set jwt.secret='replace-with-strong-secret'
+```
+
+### 5. Verify deployment
+
+```bash
+kubectl -n satplan get pods,svc,pvc
+kubectl -n satplan logs deploy/satplan
+```
+
+### 6. Access the service
+
+Port-forward for local testing:
+
+```bash
+kubectl -n satplan port-forward svc/satplan 8080:8080
+```
+
+Then open:
+- Application: http://localhost:8080
+- Admin Panel: http://localhost:8080/admin
+
+### 7. Upgrade and rollback
+
+```bash
+# Upgrade with a new image tag
+helm upgrade satplan ./helm/satplan \
+  -n satplan \
+  --set image.repository=${IMAGE_REPO} \
+  --set image.tag=v1.0.1
+
+# View revision history
+helm -n satplan history satplan
+
+# Roll back to previous revision
+helm -n satplan rollback satplan 1
+```
+
+### Notes
+
+- This chart is designed for SQLite and single-pod deployment by default.
+- For high availability and multiple replicas, migrate to an external database.
+
 ## License
 
 See LICENSE file for details.
