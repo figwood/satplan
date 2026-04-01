@@ -24,6 +24,12 @@ The satellite and sensor hierarchy is still defined inside the `EMBEDDED_TREE_DA
 - If the automatic refresh fails, the UI alerts the operator and continues with the latest available data.
 - TLE CRUD now lives in D1: `/api/tle` supports GET/POST/PUT/DELETE, and `/api/tle/status` returns the most recent sync timestamp.
 
+## Twilight line visualization
+- The map can render the day-night terminator (twilight line) so operators can quickly see illumination conditions on Earth.
+- In normal browsing mode, the terminator is drawn using the current timeline position.
+- When a planning result is available, the twilight line is no longer static: it is replayed alongside the planning timeline and updates continuously for each planning time step.
+- This makes it easier to judge whether each scheduled observation window happens in daylight, nighttime, or near sunrise/sunset transition zones.
+
 ## Tiles & assets
 Keep `static/tiles/` in the deployment bundle so OpenLayers can load the bundled imagery. If you regenerate tiles locally, overwrite the files inside `tiles/` before publishing so the planner uses the newest basemap data.
 
