@@ -117,6 +117,7 @@ let vectorLayer = null;
 let solarOverlaySource = null;
 let solarOverlayLayer = null;
 let solarRefreshTimer = null;
+let solarOverlayReferenceTimeMs = null;
 let isDrawing = false;
 let planningDays = 3;
 let planningArea = null;
@@ -346,12 +347,42 @@ function getSolarFeatureStyle(feature) {
     return null;
 }
 
-function updateSolarOverlay() {
+function resolveSolarOverlayTime(explicitTime) {
+    if (explicitTime instanceof Date) {
+        return new Date(explicitTime.getTime());
+    }
+
+    if (typeof explicitTime === 'number' && Number.isFinite(explicitTime)) {
+        return new Date(explicitTime);
+    }
+
+    if (typeof solarOverlayReferenceTimeMs === 'number' && Number.isFinite(solarOverlayReferenceTimeMs)) {
+        return new Date(solarOverlayReferenceTimeMs);
+    }
+
+    return new Date();
+}
+
+function setSolarOverlayReferenceTime(timestampMs) {
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) {
+        return;
+    }
+
+    solarOverlayReferenceTimeMs = timestampMs;
+    updateSolarOverlay();
+}
+
+function resetSolarOverlayToNow() {
+    solarOverlayReferenceTimeMs = null;
+    updateSolarOverlay();
+}
+
+function updateSolarOverlay(explicitTime) {
     if (!map || !solarOverlaySource) {
         return;
     }
 
-    const now = new Date();
+    const now = resolveSolarOverlayTime(explicitTime);
     const sunPosition = calculateSunPosition(now);
     const terminatorPoints = getTerminatorPoints(sunPosition.lat, sunPosition.lng);
     const features = [];
@@ -1428,6 +1459,9 @@ function displayResultsTable(regions, sensors) {
 function hideResultsTable() {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'none';
+
+    // When planning results are cleared/hidden, restore real-time solar overlay.
+    resetSolarOverlayToNow();
     
     // Disable export button
     const exportBtn = document.getElementById('exportBtn');
@@ -1521,6 +1555,9 @@ function highlightRegion(region, clickedRow) {
             }));
         }
     });
+
+    // Show terminator at this scan strip's start time.
+    setSolarOverlayReferenceTime(region.startTimestamp * 1000);
 }
 
 // Export results to PDF
