@@ -114,6 +114,9 @@ let map = null;
 let drawInteraction = null;
 let vectorSource = null;
 let vectorLayer = null;
+let solarOverlaySource = null;
+let solarOverlayLayer = null;
+let solarRefreshTimer = null;
 let isDrawing = false;
 let planningDays = 3;
 let planningArea = null;
@@ -146,6 +149,52 @@ document.addEventListener('DOMContentLoaded', function() {
     setDrawButtonState(false);
 });
 
+function scheduleMapResize() {
+    if (!map) {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        map.updateSize();
+    });
+}
+
+function getFullMapExtent() {
+    const projection = ol.proj.get('EPSG:3857');
+    const projectionExtent = projection?.getExtent?.();
+    if (projectionExtent) {
+        return projectionExtent.slice();
+    }
+
+    return ol.proj.transformExtent([-180, -85, 180, 85], 'EPSG:4326', projection);
+}
+
+function getBaseLayerMinZoom() {
+    if (!map) {
+        return null;
+    }
+
+    const baseLayer = map.getLayers().item(0);
+    const source = baseLayer?.getSource?.();
+    const tileGrid = source?.getTileGrid?.();
+
+    if (tileGrid && typeof tileGrid.getMinZoom === 'function') {
+        return tileGrid.getMinZoom();
+    }
+
+    return null;
+}
+
+function createLocalTileSource() {
+    return new ol.source.XYZ({
+        url: 'tiles/{z}/{x}/{-y}.png',
+        minZoom: 1,
+        maxZoom: 4,
+        attributions: 'Local Tiles',
+        wrapX: false
+    });
+}
+
 function setDrawButtonState(enabled) {
     const drawAreaBtn = document.getElementById('drawAreaBtn');
     if (!drawAreaBtn) {
@@ -173,26 +222,20 @@ function initMap() {
         })
     });
 
-    // Check if local tiles exist by testing a sample tile
-    let baseMapSource;
-    const testImage = new Image();
-    testImage.onload = function() {
-        // Local tiles exist, switch to them
-        const localSource = new ol.source.XYZ({
-            url: 'tiles/{z}/{x}/{-y}.png',
-            minZoom: 1,
-            maxZoom: 4,
-            attributions: 'Local Tiles'
-        });
-        map.getLayers().getArray()[0].setSource(localSource);
-    };
-    testImage.onerror = function() {
-        // Local tiles don't exist, keep using OSM (already set as default)
-    };
-    testImage.src = 'tiles/1/0/0.png';
+    solarOverlaySource = new ol.source.Vector({
+        wrapX: true
+    });
+    solarOverlayLayer = new ol.layer.Vector({
+        source: solarOverlaySource,
+        style: getSolarFeatureStyle,
+        updateWhileAnimating: true,
+        updateWhileInteracting: true
+    });
+    solarOverlayLayer.setZIndex(5);
+    vectorLayer.setZIndex(10);
 
     // Default to OSM, will be replaced if local tiles are found
-    baseMapSource = new ol.source.OSM();
+    const baseMapSource = new ol.source.OSM();
 
     map = new ol.Map({
         target: 'map',
@@ -205,13 +248,32 @@ function initMap() {
             new ol.layer.Tile({
                 source: baseMapSource
             }),
+            solarOverlayLayer,
             vectorLayer
         ],
         view: new ol.View({
             center: ol.proj.fromLonLat([0, 0]),
-            zoom: 2
+            zoom: 2,
+            multiWorld: true
         })
     });
+
+    const testImage = new Image();
+    testImage.onload = function() {
+        if (!map) {
+            return;
+        }
+
+        const localSource = createLocalTileSource();
+        map.getLayers().getArray()[0].setSource(localSource);
+        zoomToFullExtent();
+    };
+    testImage.onerror = function() {
+        // Local tiles don't exist, keep using OSM (already set as default)
+    };
+    testImage.src = 'tiles/1/0/0.png';
+
+    window.addEventListener('resize', scheduleMapResize);
 
     // Add mouse move listener to update coordinates
     map.on('pointermove', function(evt) {
@@ -232,6 +294,190 @@ function initMap() {
             tableLabel.textContent = coordText;
         }
     });
+
+    updateSolarOverlay();
+    solarRefreshTimer = window.setInterval(updateSolarOverlay, 60000);
+}
+
+function getSolarFeatureStyle(feature) {
+    const featureType = feature.get('featureType');
+
+    if (featureType === 'night') {
+        return new ol.style.Style({
+            fill: new ol.style.Fill({
+                color: 'rgba(0, 0, 0, 0.24)'
+            })
+        });
+    }
+
+    if (featureType === 'terminator') {
+        return new ol.style.Style({
+            stroke: new ol.style.Stroke({
+                color: 'rgba(245, 158, 11, 0.95)',
+                width: 2,
+                lineDash: [8, 8]
+            })
+        });
+    }
+
+    if (featureType === 'sun') {
+        return new ol.style.Style({
+            image: new ol.style.Circle({
+                radius: 10,
+                fill: new ol.style.Fill({
+                    color: 'rgba(245, 158, 11, 0.9)'
+                }),
+                stroke: new ol.style.Stroke({
+                    color: 'rgba(255, 255, 255, 0.95)',
+                    width: 2
+                })
+            }),
+            text: new ol.style.Text({
+                text: '☀',
+                font: '20px sans-serif',
+                offsetY: -1,
+                fill: new ol.style.Fill({
+                    color: '#ffffff'
+                })
+            })
+        });
+    }
+
+    return null;
+}
+
+function updateSolarOverlay() {
+    if (!map || !solarOverlaySource) {
+        return;
+    }
+
+    const now = new Date();
+    const sunPosition = calculateSunPosition(now);
+    const terminatorPoints = getTerminatorPoints(sunPosition.lat, sunPosition.lng);
+    const features = [];
+
+    features.push(new ol.Feature({
+        geometry: buildNightGeometry(terminatorPoints, sunPosition.lat),
+        featureType: 'night'
+    }));
+
+    features.push(new ol.Feature({
+        geometry: new ol.geom.LineString(
+            terminatorPoints.map(([lat, lng]) => ol.proj.fromLonLat([lng, lat]))
+        ),
+        featureType: 'terminator'
+    }));
+
+    features.push(new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat([sunPosition.lng, sunPosition.lat])),
+        featureType: 'sun'
+    }));
+
+    solarOverlaySource.clear(true);
+    solarOverlaySource.addFeatures(features);
+    updateSolarInfo(now, sunPosition);
+}
+
+function buildNightGeometry(terminatorPoints, sunLat) {
+    const poleLat = sunLat > 0 ? -90 : 90;
+    const points = sunLat > 0 ? terminatorPoints : [...terminatorPoints].reverse();
+    const ring = points.map(([lat, lng]) => ol.proj.fromLonLat([lng, lat]));
+    const lastPoint = points[points.length - 1];
+    const firstPoint = points[0];
+
+    ring.push(ol.proj.fromLonLat([lastPoint[1], poleLat]));
+    ring.push(ol.proj.fromLonLat([firstPoint[1], poleLat]));
+    ring.push(ring[0]);
+
+    return new ol.geom.Polygon([ring]);
+}
+
+function updateSolarInfo(date, sunPosition) {
+    const timeEl = document.getElementById('solarTime');
+    const coordsEl = document.getElementById('solarCoords');
+
+    if (timeEl) {
+        timeEl.textContent = `UTC: ${date.toUTCString()}`;
+    }
+
+    if (coordsEl) {
+        coordsEl.textContent = `Sun: ${formatSignedDegrees(sunPosition.lat, 'N', 'S')}, ${formatSignedDegrees(sunPosition.lng, 'E', 'W')}`;
+    }
+}
+
+function formatSignedDegrees(value, positiveSuffix, negativeSuffix) {
+    const suffix = value >= 0 ? positiveSuffix : negativeSuffix;
+    return `${Math.abs(value).toFixed(2)}°${suffix}`;
+}
+
+function getJulianDay(date) {
+    const a = Math.floor((14 - (date.getUTCMonth() + 1)) / 12);
+    const year = date.getUTCFullYear() + 4800 - a;
+    const month = date.getUTCMonth() + 1 + 12 * a - 3;
+
+    const julianDayNumber = date.getUTCDate()
+        + Math.floor((153 * month + 2) / 5)
+        + 365 * year
+        + Math.floor(year / 4)
+        - Math.floor(year / 100)
+        + Math.floor(year / 400)
+        - 32045;
+
+    return julianDayNumber
+        + (date.getUTCHours() - 12) / 24
+        + date.getUTCMinutes() / 1440
+        + date.getUTCSeconds() / 86400;
+}
+
+function calculateSunPosition(date) {
+    const julianDay = getJulianDay(date);
+    const elapsedDays = julianDay - 2451545.0;
+    const meanLongitude = (280.46 + 0.9856474 * elapsedDays) % 360;
+    const meanAnomaly = ((357.528 + 0.9856003 * elapsedDays) % 360) * Math.PI / 180;
+    const eclipticLongitude = (meanLongitude + 1.915 * Math.sin(meanAnomaly) + 0.02 * Math.sin(2 * meanAnomaly)) * Math.PI / 180;
+    const obliquity = (23.439 - 0.0000004 * elapsedDays) * Math.PI / 180;
+    const declination = Math.asin(Math.sin(obliquity) * Math.sin(eclipticLongitude)) * 180 / Math.PI;
+    const rightAscension = Math.atan2(
+        Math.cos(obliquity) * Math.sin(eclipticLongitude),
+        Math.cos(eclipticLongitude)
+    ) * 180 / Math.PI;
+    const greenwichMeanSiderealTime = (18.697374558 + 24.06570982441908 * elapsedDays) % 24;
+
+    let longitude = -(greenwichMeanSiderealTime * 15 - rightAscension);
+    while (longitude > 180) {
+        longitude -= 360;
+    }
+    while (longitude < -180) {
+        longitude += 360;
+    }
+
+    return {
+        lat: declination,
+        lng: longitude
+    };
+}
+
+function getTerminatorPoints(sunLat, sunLng, segments = 360) {
+    const points = [];
+    const sunLatRadians = sunLat * Math.PI / 180;
+    const tangent = Math.tan(sunLatRadians);
+
+    for (let index = 0; index <= segments; index += 1) {
+        const lng = -180 + (index * 360 / segments);
+        let deltaLng = lng - sunLng;
+
+        while (deltaLng > 180) {
+            deltaLng -= 360;
+        }
+        while (deltaLng < -180) {
+            deltaLng += 360;
+        }
+
+        const lat = Math.atan(-Math.cos(deltaLng * Math.PI / 180) / tangent) * 180 / Math.PI;
+        points.push([lat, lng]);
+    }
+
+    return points;
 }
 
 // Initialize controls
@@ -782,12 +1028,29 @@ function zoomOut() {
 }
 
 function zoomToFullExtent() {
+    if (!map) {
+        return;
+    }
+
     const view = map.getView();
-    view.animate({
-        center: ol.proj.fromLonLat([0, 0]),
-        zoom: 2,
+    const fullExtent = getFullMapExtent();
+    if (!fullExtent) {
+        return;
+    }
+
+    map.updateSize();
+    view.cancelAnimations();
+    view.fit(fullExtent, {
+        size: map.getSize(),
+        padding: [16, 16, 16, 16],
+        nearest: true,
         duration: 500
     });
+
+    const minZoom = getBaseLayerMinZoom();
+    if (typeof minZoom === 'number' && view.getZoom() < minZoom) {
+        view.setZoom(minZoom);
+    }
 }
 
 function clearMap() {
@@ -1094,6 +1357,7 @@ function displayResultsTable(regions, sensors) {
         if (tableCoordLabel) {
             tableCoordLabel.style.display = 'block';
         }
+        scheduleMapResize();
         return;
     }
     
@@ -1156,6 +1420,8 @@ function displayResultsTable(regions, sensors) {
     if (tableCoordLabel) {
         tableCoordLabel.style.display = 'block';
     }
+
+    scheduleMapResize();
 }
 
 // Hide results table
@@ -1178,6 +1444,8 @@ function hideResultsTable() {
     if (tableCoordLabel) {
         tableCoordLabel.style.display = 'none';
     }
+
+    scheduleMapResize();
 }
 
 // Check if results table is visible
