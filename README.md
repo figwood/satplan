@@ -2,6 +2,8 @@
 
 The SatPlan experience is now delivered as a static OpenLayers planner. The entire application lives under `static/`, which means the UI can be deployed directly to Cloudflare Pages, Workers, or any static host without a Go backend or database.
 
+![alt text](planning.png)
+
 ## What's in this repo
 - `static/index.html` – the single entry point with the satellite tree, controls, and the map surface.
 - `static/script.js` – all the UI logic, including the embedded satellite tree and the localStorage cache guard.

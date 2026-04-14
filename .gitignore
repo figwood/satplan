@@ -55,3 +55,4 @@ satplan
 tiles
 data_bak
 *.sql
+.wrangler

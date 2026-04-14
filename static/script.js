@@ -722,7 +722,7 @@ async function refreshTLEData(options = {}) {
             showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
         }
         if (notifyOnError) {
-            alert(`Failed to refresh TLE data: ${error.message}`);
+            console.log(`Failed to refresh TLE data: ${error.message}`);
         }
         return false;
     }
@@ -1248,17 +1248,6 @@ async function callSensorInRegion(area) {
             return;
         }
         
-        // Create Calculator instance
-        const calc = new satpathModule.Calculator();
-        
-        // Create TargetArea with west, east, north, south
-        const targetArea = new satpathModule.TargetArea(
-            area.minLon, // west
-            area.maxLon, // east
-            area.maxLat, // north
-            area.minLat  // south
-        );
-        
         // Time range: use current UTC date at 00:00:00 + planning days
         const now = new Date();
         const utcStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
@@ -1277,6 +1266,18 @@ async function callSensorInRegion(area) {
                 continue;
             }
 
+            // Create a fresh Calculator and TargetArea per satellite.
+            // TargetArea is passed by value into SensorInRegion (C++ side), so the copy
+            // constructor must deep-copy the owned Color* members — this is fixed in the
+            // C++ source so each copy owns its own Color objects and double-free is avoided.
+            const calc = new satpathModule.Calculator();
+            const targetArea = new satpathModule.TargetArea(
+                area.minLon, // west
+                area.maxLon, // east
+                area.maxLat, // north
+                area.minLat  // south
+            );
+
             const vecSensors = new satpathModule.VectorSensor();
             satInfo.sensors.forEach(sensorInfo => {
                 const sideAngle = sensorInfo.cur_side_angle ?? sensorInfo.left_side_angle ?? 0.0;
@@ -1294,18 +1295,29 @@ async function callSensorInRegion(area) {
                     sensor.setHexColor(sensorInfo.hex_color || '#000000');
                 }
                 vecSensors.push_back(sensor);
+                // Do NOT call sensor.delete(): push_back copy-constructs into the vector;
+                // the JS wrapper's finalizer will handle the original if GC'd.
             });
             
-            const regions = calc.SensorInRegion(
-                String(satId),
-                String(satInfo.name),
-                String(satInfo.tle1),
-                String(satInfo.tle2),
-                vecSensors,
-                utcStartTime,
-                utcEndTime,
-                targetArea
-            );
+            let regions = null;
+            try {
+                regions = calc.SensorInRegion(
+                    String(satId),
+                    String(satInfo.name),
+                    String(satInfo.tle1),
+                    String(satInfo.tle2),
+                    vecSensors,
+                    utcStartTime,
+                    utcEndTime,
+                    targetArea
+                );
+            } catch (innerErr) {
+                console.error(`Error in SensorInRegion for sat ${satId}:`, innerErr);
+                if (typeof vecSensors.delete === 'function') vecSensors.delete();
+                if (typeof targetArea.delete === 'function') targetArea.delete();
+                if (typeof calc.delete === 'function') calc.delete();
+                throw innerErr;
+            }
             
             // Extract region data
             if (regions && typeof regions.size === 'function') {
@@ -1337,7 +1349,13 @@ async function callSensorInRegion(area) {
                         satName: String(satInfo.name),
                     });
                 }
+                // Do NOT call regions.delete(): the returned vector is owned by the Emscripten
+                // binding wrapper and will be freed when it goes out of scope or is GC'd.
             }
+
+            if (typeof vecSensors.delete === 'function') vecSensors.delete();
+            if (typeof targetArea.delete === 'function') targetArea.delete();
+            if (typeof calc.delete === 'function') calc.delete();
         }
         
         // Display regions on map
