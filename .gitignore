@@ -53,3 +53,4 @@ uploads/
 *.db
 tiles
 data_bak
+.wrangler
