@@ -1259,26 +1259,6 @@ async function callSensorInRegion(area) {
             area.minLat  // south
         );
         
-        // Create VectorSensor and populate with checked sensors
-        const vecSensors = new satpathModule.VectorSensor();
-        checkedSensors.forEach(s => {
-            const sideAngle = s.cur_side_angle ?? s.left_side_angle ?? 0.0;
-            const observeAngle = s.observe_angle ?? 60.0;
-            const sensor = new satpathModule.Sensor(
-                s.sat_norad_id || '',
-                s.id,
-                s.sat_name || '',
-                s.name,
-                s.init_angle || 0.0,
-                sideAngle,
-                observeAngle
-            );
-            if (sensor.setHexColor) {
-                sensor.setHexColor(s.hex_color || '#000000');
-            }
-            vecSensors.push_back(sensor);
-        });
-        
         // Time range: use current UTC date at 00:00:00 + planning days
         const now = new Date();
         const utcStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
@@ -1296,6 +1276,25 @@ async function callSensorInRegion(area) {
             if (!satInfo.tle1 || !satInfo.tle2) {
                 continue;
             }
+
+            const vecSensors = new satpathModule.VectorSensor();
+            satInfo.sensors.forEach(sensorInfo => {
+                const sideAngle = sensorInfo.cur_side_angle ?? sensorInfo.left_side_angle ?? 0.0;
+                const observeAngle = sensorInfo.observe_angle ?? 60.0;
+                const sensor = new satpathModule.Sensor(
+                    sensorInfo.sat_norad_id || '',
+                    sensorInfo.id,
+                    sensorInfo.sat_name || '',
+                    sensorInfo.name,
+                    sensorInfo.init_angle || 0.0,
+                    sideAngle,
+                    observeAngle
+                );
+                if (sensor.setHexColor) {
+                    sensor.setHexColor(sensorInfo.hex_color || '#000000');
+                }
+                vecSensors.push_back(sensor);
+            });
             
             const regions = calc.SensorInRegion(
                 String(satId),
