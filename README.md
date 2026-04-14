@@ -1,6 +1,9 @@
 # SatPlan - Satellite Planning System
 
-A satellite mission planning system with Go backend serving a static frontend.
+A production-ready mission planning tool for scheduling Earth observation satellite passes over target areas.
+
+**Live demo**: https://satplan.fogsea.cf 
+**Tech stack**: Go · WebAssembly (orbital mechanics) · OpenLayers · SQLite · Helm/Kubernetes
 
 ## Features
 
@@ -202,30 +205,21 @@ Additional sources can be added to the `tle_site` table.
   - **Important:** Change this in production for security!
 
 ## Architecture
+Browser
+├── OpenLayers map (target area selection)
+├── WASM module (orbital mechanics, compiled from Go)
+│   ├── SGP4/SDP4 propagator
+│   ├── Coverage footprint calculation
+│   └── Pass window prediction
+└── REST client → Go HTTP Server (port 8080)
+├── /api/v1/* → API handlers (JWT auth)
+├── /        → Static file serving
+└── SQLite   → satellites, sensors, TLE data
 
-Single Go application serving both API and static frontend:
-
-```
-┌─────────────────────────────────────┐
-│   Go HTTP Server (Port 8080)       │
-│                                     │
-│  ├── /api/v1/*  → API Handlers      │
-│  │   └── JSON responses             │
-│  │                                  │
-│  ├── /          → Static Files      │
-│  │   └── HTML/CSS/JS                │
-│  │                                  │
-│  └── SQLite Database                │
-│      └── data/satplan.db            │
-└─────────────────────────────────────┘
-```
-
-Benefits:
-- Single binary deployment
-- No CORS issues
-- Fast static file serving
-- Minimal dependencies
-- Easy to scale
+**Why WebAssembly for orbital computation?**  
+Orbital mechanics (SGP4 propagation, coverage geometry) runs entirely 
+in the browser — no round-trip latency for interactive planning. The same 
+Go code compiles to both the native backend and the WASM module.
 
 ## Helm Chart (Kubernetes)
 
