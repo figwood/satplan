@@ -722,7 +722,7 @@ async function refreshTLEData(options = {}) {
             showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
         }
         if (notifyOnError) {
-            alert(`TLE 自动更新失败：${error.message}`);
+            alert(`Failed to refresh TLE data: ${error.message}`);
         }
         return false;
     }
