@@ -1,6 +1,9 @@
 const DEFAULT_SAT_COLOR = '#3B82F6';
 const DEFAULT_SENSOR_COLOR = '#94A3B8';
-const TLE_UPDATE_URL = 'https://celestrak.com/NORAD/elements/resource.txt';
+const TLE_UPDATE_URLS = [
+  'https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=tle',
+  'https://celestrak.org/NORAD/elements/resource.txt'
+];
 
 const normalizeNoradId = (value) => {
   if (typeof value === 'string') {
@@ -158,6 +161,30 @@ const parseTleFeed = (text) => {
   return records;
 };
 
+const fetchTleFeedText = async () => {
+  let lastError = null;
+
+  for (const url of TLE_UPDATE_URLS) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: 'text/plain'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+      }
+
+      return await response.text();
+    } catch (error) {
+      lastError = new Error(`Failed to fetch ${url}: ${error.message}`);
+    }
+  }
+
+  throw lastError || new Error('No TLE feed URL succeeded');
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -175,12 +202,7 @@ export default {
         }
 
         try {
-          const response = await fetch(TLE_UPDATE_URL);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} ${response.statusText}`);
-          }
-
-          const text = await response.text();
+          const text = await fetchTleFeedText();
           const records = parseTleFeed(text);
           if (!records.length) {
             return jsonResponse({ error: 'No TLE records were parsed from the feed' }, 400);
