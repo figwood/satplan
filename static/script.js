@@ -111,6 +111,7 @@ const EMBEDDED_TREE_DATA = {
 // Data storage
 let treeData = null;
 let map = null;
+let baseMapLayer = null;
 let drawInteraction = null;
 let vectorSource = null;
 let vectorLayer = null;
@@ -121,6 +122,41 @@ let solarOverlayReferenceTimeMs = null;
 let isDrawing = false;
 let planningDays = 3;
 let planningArea = null;
+let availableBaseMaps = ['osm', 'google', 'googleSatellite', 'bing', 'bingSatellite'];
+let activeBaseMapKey = 'osm';
+
+const BASE_MAP_DEFINITIONS = {
+    osm: {
+        label: 'OpenStreetMap',
+        createSource: () => new ol.source.OSM()
+    },
+    google: {
+        label: 'Google Road',
+        createSource: () => new ol.source.XYZ({
+            url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+            maxZoom: 20,
+            crossOrigin: 'anonymous',
+            attributions: 'Google'
+        })
+    },
+    googleSatellite: {
+        label: 'Google Satellite',
+        createSource: () => new ol.source.XYZ({
+            url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+            maxZoom: 20,
+            crossOrigin: 'anonymous',
+            attributions: 'Google'
+        })
+    },
+    bing: {
+        label: 'Bing Road',
+        createSource: () => createBingTileSource('r')
+    },
+    bingSatellite: {
+        label: 'Bing Satellite',
+        createSource: () => createBingTileSource('a')
+    }
+};
 
 // Satpath WebAssembly module
 let satpathModule = null;
@@ -186,14 +222,92 @@ function getBaseLayerMinZoom() {
     return null;
 }
 
-function createLocalTileSource() {
+function createBingTileSource(imageryPrefix) {
     return new ol.source.XYZ({
-        url: 'tiles/{z}/{x}/{-y}.png',
-        minZoom: 1,
-        maxZoom: 4,
-        attributions: 'Local Tiles',
-        wrapX: false
+        maxZoom: 19,
+        crossOrigin: 'anonymous',
+        attributions: 'Bing',
+        tileUrlFunction: tileCoord => createBingTileUrl(tileCoord, imageryPrefix)
     });
+}
+
+function createBingTileUrl(tileCoord, imageryPrefix = 'r') {
+    if (!tileCoord) {
+        return undefined;
+    }
+
+    const z = tileCoord[0];
+    const x = tileCoord[1];
+    const y = tileCoord[2];
+    const quadKey = tileXYToQuadKey(x, y, z);
+    const subdomain = Math.abs((x + y) % 4);
+
+    return `https://ecn.t${subdomain}.tiles.virtualearth.net/tiles/${imageryPrefix}${quadKey}.jpeg?g=13239&mkt=en-US&n=z`;
+}
+
+function tileXYToQuadKey(x, y, z) {
+    let quadKey = '';
+
+    for (let index = z; index > 0; index -= 1) {
+        let digit = 0;
+        const mask = 1 << (index - 1);
+
+        if ((x & mask) !== 0) {
+            digit += 1;
+        }
+
+        if ((y & mask) !== 0) {
+            digit += 2;
+        }
+
+        quadKey += digit.toString();
+    }
+
+    return quadKey;
+}
+
+function getBaseMapDefinition(baseMapKey) {
+    return BASE_MAP_DEFINITIONS[baseMapKey] || BASE_MAP_DEFINITIONS.osm;
+}
+
+function syncBaseMapSelect() {
+    const baseMapSelect = document.getElementById('baseMapSource');
+    if (!baseMapSelect) {
+        return;
+    }
+
+    const optionsMarkup = availableBaseMaps
+        .map(baseMapKey => {
+            const definition = getBaseMapDefinition(baseMapKey);
+            const selected = baseMapKey === activeBaseMapKey ? ' selected' : '';
+            return `<option value="${baseMapKey}"${selected}>${definition.label}</option>`;
+        })
+        .join('');
+
+    baseMapSelect.innerHTML = optionsMarkup;
+    baseMapSelect.value = activeBaseMapKey;
+}
+
+function setBaseMapSource(baseMapKey) {
+    const resolvedKey = availableBaseMaps.includes(baseMapKey) ? baseMapKey : 'osm';
+    const definition = getBaseMapDefinition(resolvedKey);
+
+    activeBaseMapKey = resolvedKey;
+    if (baseMapLayer) {
+        baseMapLayer.setSource(definition.createSource());
+    }
+
+    syncBaseMapSelect();
+
+    if (!map) {
+        return;
+    }
+
+    const minZoom = getBaseLayerMinZoom();
+    const view = map.getView();
+    if (typeof minZoom === 'number' && view.getZoom() < minZoom) {
+        view.setZoom(minZoom);
+    }
 }
 
 function setDrawButtonState(enabled) {
@@ -235,8 +349,9 @@ function initMap() {
     solarOverlayLayer.setZIndex(5);
     vectorLayer.setZIndex(10);
 
-    // Default to OSM, will be replaced if local tiles are found
-    const baseMapSource = new ol.source.OSM();
+    baseMapLayer = new ol.layer.Tile({
+        source: getBaseMapDefinition(activeBaseMapKey).createSource()
+    });
 
     map = new ol.Map({
         target: 'map',
@@ -246,9 +361,7 @@ function initMap() {
             rotate: true
         }),
         layers: [
-            new ol.layer.Tile({
-                source: baseMapSource
-            }),
+            baseMapLayer,
             solarOverlayLayer,
             vectorLayer
         ],
@@ -259,20 +372,7 @@ function initMap() {
         })
     });
 
-    const testImage = new Image();
-    testImage.onload = function() {
-        if (!map) {
-            return;
-        }
-
-        const localSource = createLocalTileSource();
-        map.getLayers().getArray()[0].setSource(localSource);
-        zoomToFullExtent();
-    };
-    testImage.onerror = function() {
-        // Local tiles don't exist, keep using OSM (already set as default)
-    };
-    testImage.src = 'tiles/1/0/0.png';
+    syncBaseMapSelect();
 
     window.addEventListener('resize', scheduleMapResize);
 
@@ -530,6 +630,12 @@ function getTerminatorPoints(sunLat, sunLng, segments = 360) {
 
 // Initialize controls
 function initControls() {
+    const baseMapSelect = document.getElementById('baseMapSource');
+    syncBaseMapSelect();
+    baseMapSelect.addEventListener('change', function(e) {
+        setBaseMapSource(e.target.value);
+    });
+
     // Planning days select
     const planningDaysSelect = document.getElementById('planningDays');
     planningDaysSelect.addEventListener('change', function(e) {
