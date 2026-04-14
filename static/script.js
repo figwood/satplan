@@ -322,26 +322,43 @@ function getSolarFeatureStyle(feature) {
     }
 
     if (featureType === 'sun') {
-        return new ol.style.Style({
-            image: new ol.style.Circle({
-                radius: 10,
-                fill: new ol.style.Fill({
-                    color: 'rgba(245, 158, 11, 0.9)'
-                }),
-                stroke: new ol.style.Stroke({
-                    color: 'rgba(255, 255, 255, 0.95)',
-                    width: 2
+        return [
+            new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 16,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 196, 0, 0.3)'
+                    })
                 })
             }),
-            text: new ol.style.Text({
-                text: '☀',
-                font: '20px sans-serif',
-                offsetY: -1,
-                fill: new ol.style.Fill({
-                    color: '#ffffff'
+            new ol.style.Style({
+                image: new ol.style.RegularShape({
+                    points: 8,
+                    radius: 12,
+                    radius2: 6,
+                    angle: Math.PI / 8,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 149, 0, 0.98)'
+                    }),
+                    stroke: new ol.style.Stroke({
+                        color: 'rgba(255, 248, 220, 1)',
+                        width: 2
+                    })
+                })
+            }),
+            new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 7,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 244, 122, 1)'
+                    }),
+                    stroke: new ol.style.Stroke({
+                        color: 'rgba(255, 255, 255, 1)',
+                        width: 2
+                    })
                 })
             })
-        });
+        ];
     }
 
     return null;
