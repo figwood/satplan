@@ -27,7 +27,7 @@ The satellite and sensor hierarchy is still defined inside the `EMBEDDED_TREE_DA
 
 ## TLE updates, caching, and status
 - The planner automatically calls the D1-backed `/api/tle/refresh` endpoint when a planning run starts and the stored TLEs are older than eight hours relative to the planning start time.
-- If the automatic refresh fails, the UI alerts the operator and continues with the latest available data.
+- If the automatic refresh fails, the UI console.logs the operator and continues with the latest available data.
 - TLE CRUD now lives in D1: `/api/tle` supports GET/POST/PUT/DELETE, and `/api/tle/status` returns the most recent sync timestamp.
 
 ## Admin console

@@ -1,7 +1,62 @@
-// API configuration (D1-backed endpoints)
+// API configuration
 const API_BASE = '/api';
 let currentEditId = null;
 const ADMIN_CREDENTIALS_KEY = 'satplan_admin_credentials';
+const adminApiState = {
+    config: null
+};
+
+function resolveGoApiBase() {
+    const { protocol, hostname, port } = window.location;
+
+    if (protocol === 'file:') {
+        return 'http://localhost:8080/api/v1';
+    }
+
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (isLocalHost && port && port !== '8080') {
+        return `${protocol}//${hostname}:8080/api/v1`;
+    }
+
+    return '/api/v1';
+}
+
+function getAdminApiConfigs() {
+    return [
+        {
+            kind: 'worker',
+            base: '/api'
+        },
+        {
+            kind: 'go',
+            base: resolveGoApiBase()
+        }
+    ];
+}
+
+function getAdminApiConfigByMode(mode) {
+    return getAdminApiConfigs().find(config => config.kind === mode) || null;
+}
+
+function getOrderedAdminApiConfigs() {
+    const session = getAdminCredentials();
+    const configs = getAdminApiConfigs();
+
+    if (adminApiState.config) {
+        return [adminApiState.config].concat(
+            configs.filter(config => config.kind !== adminApiState.config.kind)
+        );
+    }
+
+    if (session?.mode) {
+        const preferred = getAdminApiConfigByMode(session.mode);
+        if (preferred) {
+            return [preferred].concat(configs.filter(config => config.kind !== preferred.kind));
+        }
+    }
+
+    return configs;
+}
 
 const getAdminCredentials = () => {
     const raw = localStorage.getItem(ADMIN_CREDENTIALS_KEY);
@@ -10,6 +65,9 @@ const getAdminCredentials = () => {
     }
     try {
         const parsed = JSON.parse(raw);
+        if (parsed?.mode === 'go' && parsed?.token) {
+            return parsed;
+        }
         if (parsed?.username && parsed?.password) {
             return parsed;
         }
@@ -20,7 +78,7 @@ const getAdminCredentials = () => {
 };
 
 const setAdminCredentials = (credentials) => {
-    if (credentials?.username && credentials?.password) {
+    if ((credentials?.username && credentials?.password) || credentials?.token) {
         localStorage.setItem(ADMIN_CREDENTIALS_KEY, JSON.stringify(credentials));
     } else {
         localStorage.removeItem(ADMIN_CREDENTIALS_KEY);
@@ -71,50 +129,224 @@ const verifyAdminCredentials = async (credentials) => {
         return { ok: false, message: 'Please enter username and password.' };
     }
 
-    const authHeader = buildBasicAuthHeader(username, password);
-    if (!authHeader) {
-        return { ok: false, message: 'Unable to build authorization header.' };
-    }
+    for (const config of getOrderedAdminApiConfigs()) {
+        try {
+            if (config.kind === 'worker') {
+                const authHeader = buildBasicAuthHeader(username, password);
+                if (!authHeader) {
+                    return { ok: false, message: 'Unable to build authorization header.' };
+                }
 
-    try {
-        const response = await fetch(`${API_BASE}/admin/auth`, {
-            headers: {
-                Authorization: authHeader
+                const response = await fetch(`${config.base}/admin/auth`, {
+                    headers: {
+                        Authorization: authHeader
+                    }
+                });
+
+                if (response.status === 404) {
+                    continue;
+                }
+
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => null);
+                    return {
+                        ok: false,
+                        message: payload?.error || payload?.message || 'Authentication failed.'
+                    };
+                }
+
+                adminApiState.config = config;
+                return { ok: true, session: { mode: 'worker', username, password } };
             }
-        });
 
-        if (!response.ok) {
+            const response = await fetch(`${config.base}/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.status === 404) {
+                continue;
+            }
+
             const payload = await response.json().catch(() => null);
-            return {
-                ok: false,
-                message: payload?.error || 'Authentication failed.'
-            };
-        }
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    message: payload?.message || payload?.error || 'Authentication failed.'
+                };
+            }
 
-        return { ok: true };
-    } catch (error) {
-        return { ok: false, message: 'Unable to reach the admin API.' };
+            const token = payload?.data?.token;
+            if (!token) {
+                return { ok: false, message: 'Login succeeded but no token was returned.' };
+            }
+
+            adminApiState.config = config;
+            return { ok: true, session: { mode: 'go', token } };
+        } catch (error) {
+            console.warn(`Admin auth failed via ${config.kind} backend:`, error);
+        }
     }
+
+    return { ok: false, message: 'Unable to reach the admin API.' };
 };
+
+async function resolveAdminApiConfig() {
+    if (adminApiState.config) {
+        return adminApiState.config;
+    }
+
+    const session = getAdminCredentials();
+    if (session?.mode) {
+        const storedConfig = getAdminApiConfigByMode(session.mode);
+        if (storedConfig) {
+            adminApiState.config = storedConfig;
+            return storedConfig;
+        }
+    }
+
+    for (const config of getOrderedAdminApiConfigs()) {
+        try {
+            if (config.kind === 'worker') {
+                const payload = await fetch(`${config.base}/satellites`, { cache: 'no-store' }).then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                    }
+                    return res.json();
+                });
+
+                if (payload?.tree?.type === 'root') {
+                    adminApiState.config = config;
+                    return config;
+                }
+            } else {
+                const payload = await fetch(`${config.base}/sat/tree`, { cache: 'no-store' }).then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                    }
+                    return res.json();
+                });
+
+                if (payload?.data?.type === 'root') {
+                    adminApiState.config = config;
+                    return config;
+                }
+            }
+        } catch (error) {
+            console.warn(`Admin API probe failed for ${config.kind}:`, error);
+        }
+    }
+
+    throw new Error('Unable to reach a compatible admin API.');
+}
+
+function mapGoApiRequest(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    let mappedEndpoint = endpoint;
+    let mappedBody = options.body;
+
+    if (endpoint === '/admin/satellites') {
+        mappedEndpoint = method === 'POST' ? '/sat/add' : '/sat/all';
+    } else if (/^\/admin\/satellites\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/sat/update/${id}` : `/sat/${id}`;
+    } else if (endpoint === '/admin/sensors') {
+        mappedEndpoint = method === 'POST' ? '/sen/add' : '/sen/all';
+    } else if (/^\/admin\/sensors\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/sen/update/${id}` : `/sen/${id}`;
+    } else if (endpoint.startsWith('/tle?')) {
+        const params = new URLSearchParams(endpoint.split('?')[1] || '');
+        const satNoardId = params.get('sat_noard_id');
+        const id = params.get('id');
+        if (satNoardId) {
+            mappedEndpoint = `/tle/sat/${encodeURIComponent(satNoardId)}`;
+        } else if (id && method === 'DELETE') {
+            mappedEndpoint = `/tle/${encodeURIComponent(id)}`;
+        } else {
+            mappedEndpoint = '/tle/all';
+        }
+    } else if (endpoint === '/tle') {
+        mappedEndpoint = '/sat/tle/update';
+        if (typeof mappedBody === 'string') {
+            const parsed = JSON.parse(mappedBody);
+            mappedBody = JSON.stringify(Array.isArray(parsed) ? parsed : [parsed]);
+        }
+    } else if (endpoint === '/tle/refresh') {
+        mappedEndpoint = '/tle/auto-update';
+    } else if (endpoint === '/admin/tle-sites') {
+        mappedEndpoint = method === 'POST' ? '/tle/sites/add' : '/tle/sites';
+    } else if (/^\/admin\/tle-sites\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/tle/sites/update/${id}` : `/tle/sites/${id}`;
+    }
+
+    return {
+        url: `${resolveGoApiBase()}${mappedEndpoint}`,
+        body: mappedBody
+    };
+}
+
+function normalizeGoApiResponse(endpoint, options = {}, payload) {
+    const method = (options.method || 'GET').toUpperCase();
+    const data = payload?.data ?? null;
+
+    if (endpoint === '/user/me') {
+        return data;
+    }
+
+    if (endpoint === '/admin/satellites' || endpoint === '/admin/sensors' || endpoint === '/tle?limit=5000' || endpoint === '/admin/tle-sites') {
+        return { results: Array.isArray(data) ? data : [] };
+    }
+
+    if (/^\/admin\/(satellites|sensors|tle-sites)\/[^/]+$/.test(endpoint)) {
+        return { result: data };
+    }
+
+    if (endpoint.startsWith('/tle?sat_noard_id=')) {
+        return { results: Array.isArray(data) ? data : [] };
+    }
+
+    if (endpoint === '/tle/refresh') {
+        return { count: data?.inserted ?? 0, ...data };
+    }
+
+    if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+        return payload;
+    }
+
+    return payload;
+}
 
 // API helper function
 async function apiCall(endpoint, options = {}) {
+    const config = await resolveAdminApiConfig();
     const credentials = getAdminCredentials();
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers
     };
 
-    if (credentials?.username && credentials?.password) {
+    if (config.kind === 'worker' && credentials?.username && credentials?.password) {
         const authHeader = buildBasicAuthHeader(credentials.username, credentials.password);
         if (authHeader) {
             headers.Authorization = authHeader;
         }
+    } else if (config.kind === 'go' && credentials?.token) {
+        headers.Authorization = `Bearer ${credentials.token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const request = config.kind === 'go'
+        ? mapGoApiRequest(endpoint, options)
+        : { url: `${config.base}${endpoint}`, body: options.body };
+
+    const response = await fetch(request.url, {
         ...options,
-        headers
+        headers,
+        ...(request.body !== undefined ? { body: request.body } : {})
     });
 
     const rawText = await response.text();
@@ -127,6 +359,7 @@ async function apiCall(endpoint, options = {}) {
 
     if (response.status === 401) {
         setAdminCredentials(null);
+        adminApiState.config = null;
         showLogin('Session expired. Please log in again.');
     }
 
@@ -134,7 +367,7 @@ async function apiCall(endpoint, options = {}) {
         throw new Error(data?.error || data?.message || 'API request failed');
     }
 
-    return data;
+    return config.kind === 'go' ? normalizeGoApiResponse(endpoint, options, data) : data;
 }
 
 // Initial load
@@ -167,7 +400,7 @@ function initializeAuth() {
 
             const result = await verifyAdminCredentials({ username, password });
             if (result.ok) {
-                setAdminCredentials({ username, password });
+                setAdminCredentials(result.session);
                 showAdmin();
                 loadAllData();
             } else {
@@ -182,9 +415,23 @@ function initializeAuth() {
     }
 
     const existingCredentials = getAdminCredentials();
-    if (existingCredentials) {
+    if (existingCredentials?.mode === 'go' && existingCredentials?.token) {
+        const storedConfig = getAdminApiConfigByMode('go');
+        if (storedConfig) {
+            adminApiState.config = storedConfig;
+        }
+
+        apiCall('/user/me').then(() => {
+            showAdmin();
+            loadAllData();
+        }).catch((error) => {
+            setAdminCredentials(null);
+            showLogin(error.message || 'Authentication failed.');
+        });
+    } else if (existingCredentials?.username && existingCredentials?.password) {
         verifyAdminCredentials(existingCredentials).then((result) => {
             if (result.ok) {
+                setAdminCredentials(result.session);
                 showAdmin();
                 loadAllData();
             } else {
@@ -336,7 +583,7 @@ async function editSatellite(id) {
 
         document.getElementById('satelliteModal').classList.add('active');
     } catch (error) {
-        alert('Error loading satellite: ' + error.message);
+        console.log('Error loading satellite: ' + error.message);
     }
 }
 
@@ -349,7 +596,7 @@ async function deleteSatellite(id, name) {
         await apiCall(`/admin/satellites/${id}`, { method: 'DELETE' });
         loadSatellites();
     } catch (error) {
-        alert('Error deleting satellite: ' + error.message);
+        console.log('Error deleting satellite: ' + error.message);
     }
 }
 
@@ -615,7 +862,7 @@ async function editSensor(id) {
 
         document.getElementById('sensorModal').classList.add('active');
     } catch (error) {
-        alert('Error loading sensor: ' + error.message);
+        console.log('Error loading sensor: ' + error.message);
     }
 }
 
@@ -628,7 +875,7 @@ async function deleteSensor(id, name) {
         await apiCall(`/admin/sensors/${id}`, { method: 'DELETE' });
         loadSensors();
     } catch (error) {
-        alert('Error deleting sensor: ' + error.message);
+        console.log('Error deleting sensor: ' + error.message);
     }
 }
 
@@ -780,7 +1027,7 @@ async function deleteTLE(id, noradId) {
         await apiCall(`/tle?id=${id}`, { method: 'DELETE' });
         loadTLEs();
     } catch (error) {
-        alert('Error deleting TLE: ' + error.message);
+        console.log('Error deleting TLE: ' + error.message);
     }
 }
 
@@ -970,7 +1217,7 @@ async function editTLESite(id) {
 
         document.getElementById('tleSiteModal').classList.add('active');
     } catch (error) {
-        alert('Error loading TLE site: ' + error.message);
+        console.log('Error loading TLE site: ' + error.message);
     }
 }
 
@@ -984,7 +1231,7 @@ async function deleteTLESite(id, name) {
         showToast('TLE site deleted successfully', 'success');
         loadTLESites();
     } catch (error) {
-        alert('Error deleting TLE site: ' + error.message);
+        console.log('Error deleting TLE site: ' + error.message);
     }
 }
 
