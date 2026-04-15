@@ -1,9 +1,16 @@
 // API configuration
-function resolveApiBase() {
+const API_BASE = '/api';
+let currentEditId = null;
+const ADMIN_CREDENTIALS_KEY = 'satplan_admin_credentials';
+const adminApiState = {
+    config: null
+};
+
+function resolveGoApiBase() {
     const { protocol, hostname, port } = window.location;
 
     if (protocol === 'file:') {
-        return `http://localhost:8080/api/v1`;
+        return 'http://localhost:8080/api/v1';
     }
 
     const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
@@ -14,17 +21,75 @@ function resolveApiBase() {
     return '/api/v1';
 }
 
-const API_BASE = resolveApiBase();
-let currentEditId = null;
-const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+function getAdminApiConfigs() {
+    return [
+        {
+            kind: 'worker',
+            base: '/api'
+        },
+        {
+            kind: 'go',
+            base: resolveGoApiBase()
+        }
+    ];
+}
 
-const getAdminToken = () => localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+function getAdminApiConfigByMode(mode) {
+    return getAdminApiConfigs().find(config => config.kind === mode) || null;
+}
 
-const setAdminToken = (token) => {
-    if (token) {
-        localStorage.setItem(ADMIN_TOKEN_KEY, token);
+function getOrderedAdminApiConfigs() {
+    const session = getAdminCredentials();
+    const configs = getAdminApiConfigs();
+
+    if (adminApiState.config) {
+        return [adminApiState.config].concat(
+            configs.filter(config => config.kind !== adminApiState.config.kind)
+        );
+    }
+
+    if (session?.mode) {
+        const preferred = getAdminApiConfigByMode(session.mode);
+        if (preferred) {
+            return [preferred].concat(configs.filter(config => config.kind !== preferred.kind));
+        }
+    }
+
+    return configs;
+}
+
+const getAdminCredentials = () => {
+    const raw = localStorage.getItem(ADMIN_CREDENTIALS_KEY);
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.mode === 'go' && parsed?.token) {
+            return parsed;
+        }
+        if (parsed?.username && parsed?.password) {
+            return parsed;
+        }
+    } catch (error) {
+        return null;
+    }
+    return null;
+};
+
+const setAdminCredentials = (credentials) => {
+    if ((credentials?.username && credentials?.password) || credentials?.token) {
+        localStorage.setItem(ADMIN_CREDENTIALS_KEY, JSON.stringify(credentials));
     } else {
-        localStorage.removeItem(ADMIN_TOKEN_KEY);
+        localStorage.removeItem(ADMIN_CREDENTIALS_KEY);
+    }
+};
+
+const buildBasicAuthHeader = (username, password) => {
+    try {
+        return `Basic ${btoa(`${username}:${password}`)}`;
+    } catch (error) {
+        return '';
     }
 };
 
@@ -64,50 +129,224 @@ const verifyAdminCredentials = async (credentials) => {
         return { ok: false, message: 'Please enter username and password.' };
     }
 
-    try {
-        const response = await fetch(`${API_BASE}/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ username, password })
-        });
+    for (const config of getOrderedAdminApiConfigs()) {
+        try {
+            if (config.kind === 'worker') {
+                const authHeader = buildBasicAuthHeader(username, password);
+                if (!authHeader) {
+                    return { ok: false, message: 'Unable to build authorization header.' };
+                }
 
-        const payload = await response.json().catch(() => null);
+                const response = await fetch(`${config.base}/admin/auth`, {
+                    headers: {
+                        Authorization: authHeader
+                    }
+                });
 
-        if (!response.ok) {
-            return {
-                ok: false,
-                message: payload?.message || payload?.error || 'Authentication failed.'
-            };
+                if (response.status === 404) {
+                    continue;
+                }
+
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => null);
+                    return {
+                        ok: false,
+                        message: payload?.error || payload?.message || 'Authentication failed.'
+                    };
+                }
+
+                adminApiState.config = config;
+                return { ok: true, session: { mode: 'worker', username, password } };
+            }
+
+            const response = await fetch(`${config.base}/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.status === 404) {
+                continue;
+            }
+
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    message: payload?.message || payload?.error || 'Authentication failed.'
+                };
+            }
+
+            const token = payload?.data?.token;
+            if (!token) {
+                return { ok: false, message: 'Login succeeded but no token was returned.' };
+            }
+
+            adminApiState.config = config;
+            return { ok: true, session: { mode: 'go', token } };
+        } catch (error) {
+            console.warn(`Admin auth failed via ${config.kind} backend:`, error);
         }
-
-        const token = payload?.data?.token;
-        if (!token) {
-            return { ok: false, message: 'Login succeeded but no token was returned.' };
-        }
-
-        return { ok: true, token };
-    } catch (error) {
-        return { ok: false, message: 'Unable to reach the admin API.' };
     }
+
+    return { ok: false, message: 'Unable to reach the admin API.' };
 };
+
+async function resolveAdminApiConfig() {
+    if (adminApiState.config) {
+        return adminApiState.config;
+    }
+
+    const session = getAdminCredentials();
+    if (session?.mode) {
+        const storedConfig = getAdminApiConfigByMode(session.mode);
+        if (storedConfig) {
+            adminApiState.config = storedConfig;
+            return storedConfig;
+        }
+    }
+
+    for (const config of getOrderedAdminApiConfigs()) {
+        try {
+            if (config.kind === 'worker') {
+                const payload = await fetch(`${config.base}/satellites`, { cache: 'no-store' }).then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                    }
+                    return res.json();
+                });
+
+                if (payload?.tree?.type === 'root') {
+                    adminApiState.config = config;
+                    return config;
+                }
+            } else {
+                const payload = await fetch(`${config.base}/sat/tree`, { cache: 'no-store' }).then(res => {
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                    }
+                    return res.json();
+                });
+
+                if (payload?.data?.type === 'root') {
+                    adminApiState.config = config;
+                    return config;
+                }
+            }
+        } catch (error) {
+            console.warn(`Admin API probe failed for ${config.kind}:`, error);
+        }
+    }
+
+    throw new Error('Unable to reach a compatible admin API.');
+}
+
+function mapGoApiRequest(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    let mappedEndpoint = endpoint;
+    let mappedBody = options.body;
+
+    if (endpoint === '/admin/satellites') {
+        mappedEndpoint = method === 'POST' ? '/sat/add' : '/sat/all';
+    } else if (/^\/admin\/satellites\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/sat/update/${id}` : `/sat/${id}`;
+    } else if (endpoint === '/admin/sensors') {
+        mappedEndpoint = method === 'POST' ? '/sen/add' : '/sen/all';
+    } else if (/^\/admin\/sensors\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/sen/update/${id}` : `/sen/${id}`;
+    } else if (endpoint.startsWith('/tle?')) {
+        const params = new URLSearchParams(endpoint.split('?')[1] || '');
+        const satNoardId = params.get('sat_noard_id');
+        const id = params.get('id');
+        if (satNoardId) {
+            mappedEndpoint = `/tle/sat/${encodeURIComponent(satNoardId)}`;
+        } else if (id && method === 'DELETE') {
+            mappedEndpoint = `/tle/${encodeURIComponent(id)}`;
+        } else {
+            mappedEndpoint = '/tle/all';
+        }
+    } else if (endpoint === '/tle') {
+        mappedEndpoint = '/sat/tle/update';
+        if (typeof mappedBody === 'string') {
+            const parsed = JSON.parse(mappedBody);
+            mappedBody = JSON.stringify(Array.isArray(parsed) ? parsed : [parsed]);
+        }
+    } else if (endpoint === '/tle/refresh') {
+        mappedEndpoint = '/tle/auto-update';
+    } else if (endpoint === '/admin/tle-sites') {
+        mappedEndpoint = method === 'POST' ? '/tle/sites/add' : '/tle/sites';
+    } else if (/^\/admin\/tle-sites\/[^/]+$/.test(endpoint)) {
+        const id = endpoint.split('/').pop();
+        mappedEndpoint = method === 'PUT' ? `/tle/sites/update/${id}` : `/tle/sites/${id}`;
+    }
+
+    return {
+        url: `${resolveGoApiBase()}${mappedEndpoint}`,
+        body: mappedBody
+    };
+}
+
+function normalizeGoApiResponse(endpoint, options = {}, payload) {
+    const method = (options.method || 'GET').toUpperCase();
+    const data = payload?.data ?? null;
+
+    if (endpoint === '/user/me') {
+        return data;
+    }
+
+    if (endpoint === '/admin/satellites' || endpoint === '/admin/sensors' || endpoint === '/tle?limit=5000' || endpoint === '/admin/tle-sites') {
+        return { results: Array.isArray(data) ? data : [] };
+    }
+
+    if (/^\/admin\/(satellites|sensors|tle-sites)\/[^/]+$/.test(endpoint)) {
+        return { result: data };
+    }
+
+    if (endpoint.startsWith('/tle?sat_noard_id=')) {
+        return { results: Array.isArray(data) ? data : [] };
+    }
+
+    if (endpoint === '/tle/refresh') {
+        return { count: data?.inserted ?? 0, ...data };
+    }
+
+    if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+        return payload;
+    }
+
+    return payload;
+}
 
 // API helper function
 async function apiCall(endpoint, options = {}) {
-    const token = getAdminToken();
+    const config = await resolveAdminApiConfig();
+    const credentials = getAdminCredentials();
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers
     };
 
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
+    if (config.kind === 'worker' && credentials?.username && credentials?.password) {
+        const authHeader = buildBasicAuthHeader(credentials.username, credentials.password);
+        if (authHeader) {
+            headers.Authorization = authHeader;
+        }
+    } else if (config.kind === 'go' && credentials?.token) {
+        headers.Authorization = `Bearer ${credentials.token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const request = config.kind === 'go'
+        ? mapGoApiRequest(endpoint, options)
+        : { url: `${config.base}${endpoint}`, body: options.body };
+
+    const response = await fetch(request.url, {
         ...options,
-        headers
+        headers,
+        ...(request.body !== undefined ? { body: request.body } : {})
     });
 
     const rawText = await response.text();
@@ -119,15 +358,16 @@ async function apiCall(endpoint, options = {}) {
     }
 
     if (response.status === 401) {
-        setAdminToken('');
+        setAdminCredentials(null);
+        adminApiState.config = null;
         showLogin('Session expired. Please log in again.');
     }
 
     if (!response.ok) {
-        throw new Error(data?.message || data?.error || 'API request failed');
+        throw new Error(data?.error || data?.message || 'API request failed');
     }
 
-    return data?.data ?? null;
+    return config.kind === 'go' ? normalizeGoApiResponse(endpoint, options, data) : data;
 }
 
 // Initial load
@@ -160,7 +400,7 @@ function initializeAuth() {
 
             const result = await verifyAdminCredentials({ username, password });
             if (result.ok) {
-                setAdminToken(result.token);
+                setAdminCredentials(result.session);
                 showAdmin();
                 loadAllData();
             } else {
@@ -174,14 +414,30 @@ function initializeAuth() {
         });
     }
 
-    const existingToken = getAdminToken();
-    if (existingToken) {
+    const existingCredentials = getAdminCredentials();
+    if (existingCredentials?.mode === 'go' && existingCredentials?.token) {
+        const storedConfig = getAdminApiConfigByMode('go');
+        if (storedConfig) {
+            adminApiState.config = storedConfig;
+        }
+
         apiCall('/user/me').then(() => {
             showAdmin();
             loadAllData();
         }).catch((error) => {
-            setAdminToken('');
+            setAdminCredentials(null);
             showLogin(error.message || 'Authentication failed.');
+        });
+    } else if (existingCredentials?.username && existingCredentials?.password) {
+        verifyAdminCredentials(existingCredentials).then((result) => {
+            if (result.ok) {
+                setAdminCredentials(result.session);
+                showAdmin();
+                loadAllData();
+            } else {
+                setAdminCredentials(null);
+                showLogin(result.message || 'Authentication failed.');
+            }
         });
     } else {
         showLogin();
@@ -222,8 +478,8 @@ async function loadSatellites() {
     content.innerHTML = '';
 
     try {
-        const response = await apiCall('/sat/all');
-        const satellites = response || [];
+        const response = await apiCall('/admin/satellites');
+        const satellites = response.results || [];
 
         loading.style.display = 'none';
 
@@ -300,16 +556,17 @@ async function editSatellite(id) {
     document.getElementById('satelliteModalError').innerHTML = '';
 
     try {
-        const sat = await apiCall(`/sat/${id}`);
+        const response = await apiCall(`/admin/satellites/${id}`);
+        const sat = response.result;
 
         document.getElementById('satName').value = sat.name;
         document.getElementById('satHexColor').value = sat.hex_color;
         
         // For edit mode, we need to fetch TLE data
         try {
-            const tleResponse = await apiCall(`/tle/sat/${encodeURIComponent(sat.noard_id)}`);
-            if (Array.isArray(tleResponse) && tleResponse.length > 0) {
-                const tle = tleResponse[0];
+            const tleResponse = await apiCall(`/tle?sat_noard_id=${encodeURIComponent(sat.noard_id)}&limit=1`);
+            if (tleResponse.results && tleResponse.results.length > 0) {
+                const tle = tleResponse.results[0];
                 const tleText = `${sat.name}\n${tle.line1}\n${tle.line2}`;
                 document.getElementById('satTLEData').value = tleText;
                 document.getElementById('satParsedNoradID').value = sat.noard_id;
@@ -326,7 +583,7 @@ async function editSatellite(id) {
 
         document.getElementById('satelliteModal').classList.add('active');
     } catch (error) {
-        alert('Error loading satellite: ' + error.message);
+        console.log('Error loading satellite: ' + error.message);
     }
 }
 
@@ -336,10 +593,10 @@ async function deleteSatellite(id, name) {
     }
 
     try {
-        await apiCall(`/sat/${id}`, { method: 'DELETE' });
+        await apiCall(`/admin/satellites/${id}`, { method: 'DELETE' });
         loadSatellites();
     } catch (error) {
-        alert('Error deleting satellite: ' + error.message);
+        console.log('Error deleting satellite: ' + error.message);
     }
 }
 
@@ -436,12 +693,12 @@ document.getElementById('satelliteForm').addEventListener('submit', async (e) =>
         
         // Create or update satellite
         if (currentEditId) {
-            await apiCall(`/sat/update/${currentEditId}`, {
+            await apiCall(`/admin/satellites/${currentEditId}`, {
                 method: 'PUT',
                 body: JSON.stringify(satelliteData)
             });
         } else {
-            await apiCall('/sat/add', {
+            await apiCall('/admin/satellites', {
                 method: 'POST',
                 body: JSON.stringify(satelliteData)
             });
@@ -455,9 +712,9 @@ document.getElementById('satelliteForm').addEventListener('submit', async (e) =>
             line2: parsed.line2
         }];
         
-        await apiCall('/sat/tle/update', {
+        await apiCall('/tle', {
             method: 'POST',
-            body: JSON.stringify(tleData)
+            body: JSON.stringify(tleData[0])
         });
 
         closeSatelliteModal();
@@ -479,8 +736,8 @@ async function loadSensors() {
     content.innerHTML = '';
 
     try {
-        const response = await apiCall('/sen/all');
-        const sensors = response || [];
+        const response = await apiCall('/admin/sensors');
+        const sensors = response.results || [];
 
         loading.style.display = 'none';
 
@@ -548,8 +805,8 @@ async function loadSatellitesIntoSelect() {
     selectElement.innerHTML = '<option value="">Loading...</option>';
     
     try {
-        const response = await apiCall('/sat/all');
-        const satellites = response || [];
+        const response = await apiCall('/admin/satellites');
+        const satellites = response.results || [];
         
         selectElement.innerHTML = '<option value="">Select a satellite...</option>';
         satellites.forEach(sat => {
@@ -590,7 +847,8 @@ async function editSensor(id) {
         // Load satellites into dropdown first
         await loadSatellitesIntoSelect();
         
-        const sen = await apiCall(`/sen/${id}`);
+        const response = await apiCall(`/admin/sensors/${id}`);
+        const sen = response.result;
 
         document.getElementById('senSatelliteSelect').value = sen.sat_noard_id;
         document.getElementById('senName').value = sen.name;
@@ -604,7 +862,7 @@ async function editSensor(id) {
 
         document.getElementById('sensorModal').classList.add('active');
     } catch (error) {
-        alert('Error loading sensor: ' + error.message);
+        console.log('Error loading sensor: ' + error.message);
     }
 }
 
@@ -614,10 +872,10 @@ async function deleteSensor(id, name) {
     }
 
     try {
-        await apiCall(`/sen/${id}`, { method: 'DELETE' });
+        await apiCall(`/admin/sensors/${id}`, { method: 'DELETE' });
         loadSensors();
     } catch (error) {
-        alert('Error deleting sensor: ' + error.message);
+        console.log('Error deleting sensor: ' + error.message);
     }
 }
 
@@ -644,12 +902,12 @@ document.getElementById('sensorForm').addEventListener('submit', async (e) => {
 
     try {
         if (currentEditId) {
-            await apiCall(`/sen/update/${currentEditId}`, {
+            await apiCall(`/admin/sensors/${currentEditId}`, {
                 method: 'PUT',
                 body: JSON.stringify(sensorData)
             });
         } else {
-            await apiCall('/sen/add', {
+            await apiCall('/admin/sensors', {
                 method: 'POST',
                 body: JSON.stringify(sensorData)
             });
@@ -672,8 +930,8 @@ async function loadTLEs() {
     content.innerHTML = '';
 
     try {
-        const response = await apiCall('/tle/all');
-        const tles = response || [];
+        const response = await apiCall('/tle?limit=5000');
+        const tles = response.results || [];
 
         loading.style.display = 'none';
 
@@ -748,11 +1006,11 @@ async function autoUpdateTLEs() {
     try {
         showToast('Fetching TLE data from sites...', 'success');
         
-        const response = await apiCall('/tle/auto-update', {
+        const response = await apiCall('/tle/refresh', {
             method: 'POST'
         });
 
-        const count = response?.inserted ?? 0;
+        const count = response.count ?? 0;
         showToast(`Refreshed ${count} TLE record(s)`, 'success');
         loadTLEs();
     } catch (error) {
@@ -766,10 +1024,10 @@ async function deleteTLE(id, noradId) {
     }
 
     try {
-        await apiCall(`/tle/${id}`, { method: 'DELETE' });
+        await apiCall(`/tle?id=${id}`, { method: 'DELETE' });
         loadTLEs();
     } catch (error) {
-        alert('Error deleting TLE: ' + error.message);
+        console.log('Error deleting TLE: ' + error.message);
     }
 }
 
@@ -839,14 +1097,18 @@ document.getElementById('bulkTLEForm').addEventListener('submit', async (e) => {
         }
 
         // Send to backend
-        await apiCall('/sat/tle/update', {
-            method: 'POST',
-            body: JSON.stringify(tleData)
-        });
+        const results = await Promise.all(
+            tleData.map((record) =>
+                apiCall('/tle', {
+                    method: 'POST',
+                    body: JSON.stringify(record)
+                })
+            )
+        );
 
         closeBulkTLEModal();
 
-        showToast(`Updated ${tleData.length} TLE record(s)`, 'success');
+        showToast(`Updated ${results.length} TLE record(s)`, 'success');
         loadTLEs();
     } catch (error) {
         errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
@@ -872,8 +1134,8 @@ async function loadTLESites() {
     content.innerHTML = '';
 
     try {
-        const response = await apiCall('/tle/sites');
-        const sites = response || [];
+        const response = await apiCall('/admin/tle-sites');
+        const sites = response.results || [];
 
         loading.style.display = 'none';
 
@@ -946,7 +1208,8 @@ async function editTLESite(id) {
     document.getElementById('tleSiteModalError').innerHTML = '';
 
     try {
-        const site = await apiCall(`/tle/sites/${id}`);
+        const response = await apiCall(`/admin/tle-sites/${id}`);
+        const site = response.result;
 
         document.getElementById('tleSiteName').value = site.site;
         document.getElementById('tleSiteURL').value = site.url;
@@ -954,7 +1217,7 @@ async function editTLESite(id) {
 
         document.getElementById('tleSiteModal').classList.add('active');
     } catch (error) {
-        alert('Error loading TLE site: ' + error.message);
+        console.log('Error loading TLE site: ' + error.message);
     }
 }
 
@@ -964,11 +1227,11 @@ async function deleteTLESite(id, name) {
     }
 
     try {
-        await apiCall(`/tle/sites/${id}`, { method: 'DELETE' });
+        await apiCall(`/admin/tle-sites/${id}`, { method: 'DELETE' });
         showToast('TLE site deleted successfully', 'success');
         loadTLESites();
     } catch (error) {
-        alert('Error deleting TLE site: ' + error.message);
+        console.log('Error deleting TLE site: ' + error.message);
     }
 }
 
@@ -985,13 +1248,13 @@ document.getElementById('tleSiteForm').addEventListener('submit', async (e) => {
 
     try {
         if (currentEditId) {
-            await apiCall(`/tle/sites/update/${currentEditId}`, {
+            await apiCall(`/admin/tle-sites/${currentEditId}`, {
                 method: 'PUT',
                 body: JSON.stringify(siteData)
             });
             showToast('TLE site updated successfully', 'success');
         } else {
-            await apiCall('/tle/sites/add', {
+            await apiCall('/admin/tle-sites', {
                 method: 'POST',
                 body: JSON.stringify(siteData)
             });

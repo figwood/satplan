@@ -1,7 +1,10 @@
 const TLE_CACHE_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours
 const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+const plannerApiState = {
+    config: null
+};
 
-function resolveApiBase() {
+function resolveGoApiBase() {
     const { protocol, hostname, port } = window.location;
 
     if (protocol === 'file:') {
@@ -16,7 +19,76 @@ function resolveApiBase() {
     return '/api/v1';
 }
 
-const API_BASE = resolveApiBase();
+function getPlannerApiConfigs() {
+    const configs = [];
+    const seen = new Set();
+    const pushConfig = (config) => {
+        const key = `${config.kind}:${config.base}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            configs.push(config);
+        }
+    };
+
+    pushConfig({
+        kind: 'worker',
+        base: '/api',
+        treePath: '/satellites',
+        refreshPath: '/tle/refresh'
+    });
+
+    pushConfig({
+        kind: 'go',
+        base: resolveGoApiBase(),
+        treePath: '/sat/tree',
+        refreshPath: '/tle/auto-update'
+    });
+
+    return configs;
+}
+
+function getOrderedPlannerApiConfigs() {
+    const configs = getPlannerApiConfigs();
+    if (!plannerApiState.config) {
+        return configs;
+    }
+
+    return [plannerApiState.config].concat(
+        configs.filter(config => !(config.kind === plannerApiState.config.kind && config.base === plannerApiState.config.base))
+    );
+}
+
+async function fetchJson(url, options = {}) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return await response.json();
+}
+
+function normalizeTreeData(node) {
+    if (!node || typeof node !== 'object') {
+        return node;
+    }
+
+    const normalized = { ...node };
+
+    if (normalized.type === 'sensor') {
+        normalized.sat_norad_id = normalized.sat_norad_id || normalized.sat_noard_id || '';
+        normalized.sat_noard_id = normalized.sat_noard_id || normalized.sat_norad_id || '';
+        normalized.init_angle = normalized.init_angle ?? 0.0;
+        normalized.left_side_angle = normalized.left_side_angle ?? 0.0;
+        normalized.cur_side_angle = normalized.cur_side_angle ?? normalized.left_side_angle ?? 0.0;
+        normalized.observe_angle = normalized.observe_angle ?? 0.0;
+    }
+
+    if (Array.isArray(normalized.children)) {
+        normalized.children = normalized.children.map(child => normalizeTreeData(child));
+    }
+
+    return normalized;
+}
 
 const EMBEDDED_TREE_DATA = {
     id: 0,
@@ -693,28 +765,54 @@ function initControls() {
 async function refreshTLEData(options = {}) {
     const { notifyOnError = false, showStatus = false } = options;
     try {
-        const token = localStorage.getItem(ADMIN_TOKEN_KEY) || '';
         if (showStatus) {
             showTLEFeedback('Refreshing TLE data…', 'info');
         }
-        const response = await fetch(`${API_BASE}/tle/auto-update`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            }
-        });
+        let timestamp = null;
+        let refreshed = false;
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        for (const config of getOrderedPlannerApiConfigs()) {
+            try {
+                const headers = {
+                    'content-type': 'application/json'
+                };
+                let body;
+
+                if (config.kind === 'worker') {
+                    body = JSON.stringify({ source: 'celestrak' });
+                } else {
+                    const token = localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+                    if (token) {
+                        headers.Authorization = `Bearer ${token}`;
+                    }
+                }
+
+                const payload = await fetchJson(`${config.base}${config.refreshPath}`, {
+                    method: 'POST',
+                    headers,
+                    ...(body ? { body } : {})
+                });
+
+                plannerApiState.config = config;
+                if (config.kind === 'worker') {
+                    timestamp = typeof payload?.timestamp === 'number' ? payload.timestamp : null;
+                } else {
+                    timestamp = Date.now();
+                }
+                refreshed = true;
+                break;
+            } catch (refreshError) {
+                console.warn(`TLE refresh failed via ${config.kind} backend:`, refreshError);
+            }
         }
 
-        const payload = await response.json();
-        const timestamp = Date.now();
+        if (!refreshed) {
+            throw new Error('No compatible TLE refresh endpoint responded successfully');
+        }
 
         const fetched = await fetchTreeFromD1();
         if (fetched && fetched.tree) {
-            treeData = normalizeTreeData(fetched.tree);
+            treeData = fetched.tree;
         }
 
         if (typeof fetched?.tleLastSync === 'number') {
@@ -848,7 +946,7 @@ async function loadTreeData() {
 
     const fetchedTree = await fetchTreeFromD1();
     if (fetchedTree && fetchedTree.tree) {
-        treeData = normalizeTreeData(fetchedTree.tree);
+        treeData = fetchedTree.tree;
         lastSuccessfulTLEUpdate = fetchedTree.tleLastSync ?? null;
     } else {
         treeData = normalizeTreeData(cloneEmbeddedTree());
@@ -868,47 +966,31 @@ function cloneEmbeddedTree() {
     return JSON.parse(JSON.stringify(EMBEDDED_TREE_DATA));
 }
 
-function normalizeTreeData(node) {
-    if (!node || typeof node !== 'object') {
-        return node;
-    }
-
-    const normalized = { ...node };
-
-    if (normalized.type === 'sensor') {
-        normalized.sat_norad_id = normalized.sat_norad_id || normalized.sat_noard_id || '';
-        normalized.sat_noard_id = normalized.sat_noard_id || normalized.sat_norad_id || '';
-        normalized.init_angle = normalized.init_angle ?? 0.0;
-        normalized.left_side_angle = normalized.left_side_angle ?? 0.0;
-        normalized.cur_side_angle = normalized.cur_side_angle ?? normalized.left_side_angle ?? 0.0;
-        normalized.observe_angle = normalized.observe_angle ?? 0.0;
-    }
-
-    if (Array.isArray(normalized.children)) {
-        normalized.children = normalized.children.map(child => normalizeTreeData(child));
-    }
-
-    return normalized;
-}
-
 async function fetchTreeFromD1() {
-    try {
-        const response = await fetch(`${API_BASE}/sat/tree`, { cache: 'no-store' });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status} ${response.statusText}`);
-        }
+    for (const config of getOrderedPlannerApiConfigs()) {
+        try {
+            const payload = await fetchJson(`${config.base}${config.treePath}`, { cache: 'no-store' });
 
-        const payload = await response.json();
-        if (payload && payload.data && payload.data.type === 'root') {
-            return {
-                tree: payload.data,
-                tleLastSync: null
-            };
-        }
+            if (config.kind === 'worker' && payload && payload.tree && payload.tree.type === 'root') {
+                plannerApiState.config = config;
+                return {
+                    tree: normalizeTreeData(payload.tree),
+                    tleLastSync: typeof payload.tleLastSync === 'number' ? payload.tleLastSync : null
+                };
+            }
 
-        console.warn('SatPlan: unexpected payload from API');
-    } catch (error) {
-        console.error('SatPlan: failed to fetch tree data from API', error);
+            if (config.kind === 'go' && payload && payload.data && payload.data.type === 'root') {
+                plannerApiState.config = config;
+                return {
+                    tree: normalizeTreeData(payload.data),
+                    tleLastSync: null
+                };
+            }
+
+            console.warn(`SatPlan: unexpected payload from ${config.kind} API`);
+        } catch (error) {
+            console.warn(`SatPlan: failed to fetch tree data from ${config.kind} API`, error);
+        }
     }
 
     return null;
@@ -1340,7 +1422,7 @@ async function callSensorInRegion(area) {
                 // Do NOT call sensor.delete(): push_back copy-constructs into the vector;
                 // the JS wrapper's finalizer will handle the original if GC'd.
             });
-
+            
             let regions = null;
             try {
                 regions = calc.SensorInRegion(
@@ -1748,7 +1830,7 @@ function exportToPDF() {
     
     // Check if there are any results
     if (!resultsTableBody || resultsTableBody.children.length === 0) {
-        alert('No results to export. Please draw a planning area and run the analysis first.');
+        console.log('No results to export. Please draw a planning area and run the analysis first.');
         return;
     }
 
