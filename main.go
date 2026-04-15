@@ -51,6 +51,7 @@ func main() {
 	api.HandleFunc("/health", handlers.HealthCheck(db)).Methods("GET")
 	api.HandleFunc("/login", auth.LoginHandler(db)).Methods("POST")
 	api.HandleFunc("/sat/tree", handlers.GetSatelliteTree(db)).Methods("GET")
+	api.HandleFunc("/tle/auto-update", handlers.AutoUpdateTLEs(db)).Methods("POST")
 
 	// Protected routes (authentication required)
 	protected := api.PathPrefix("").Subrouter()
@@ -73,7 +74,6 @@ func main() {
 	protected.HandleFunc("/tle/sites/{id}", handlers.GetTLESiteById(db)).Methods("GET")
 	protected.HandleFunc("/tle/sites/update/{id}", handlers.UpdateTLESite(db)).Methods("PUT")
 	protected.HandleFunc("/tle/sites/{id}", handlers.DeleteTLESite(db)).Methods("DELETE")
-	protected.HandleFunc("/tle/auto-update", handlers.AutoUpdateTLEs(db)).Methods("POST")
 
 	// Sensor routes
 	protected.HandleFunc("/sen/all", handlers.GetAllSensors(db)).Methods("GET")

@@ -28,6 +28,10 @@
             padding: 30px;
         }
 
+        .hidden {
+            display: none;
+        }
+
         .header {
             text-align: center;
             margin-bottom: 30px;
@@ -349,36 +353,35 @@
     </style>
 </head>
 <body>
-    <!-- Login Form -->
-    <div id="loginContainer" class="login-container">
-        <h2>🛰️ Admin Login</h2>
-        <div id="loginError"></div>
+    <!-- Login Panel -->
+    <div id="loginPanel" class="login-container">
+        <h2>Admin Login</h2>
+        <div id="loginError" class="error" style="display: none;"></div>
         <form id="loginForm">
             <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" required>
+                <label for="loginUsername">Username</label>
+                <input type="text" id="loginUsername" placeholder="Enter username" autocomplete="username" required>
             </div>
             <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" required>
+                <label for="loginPassword">Password</label>
+                <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password" required>
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
         </form>
     </div>
 
     <!-- Main Admin Panel -->
-    <div id="adminPanel" class="container" style="display: none;">
+    <div id="adminPanel" class="container hidden">
         <div class="header">
             <h1>🛰️ SatPlan Admin</h1>
             <p>Manage Satellites, Sensors & TLE Data</p>
         </div>
 
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('satellites')">Satellites</button>
-            <button class="tab-btn" onclick="switchTab('sensors')">Sensors</button>
-            <button class="tab-btn" onclick="switchTab('tle')">TLE Data</button>
-            <button class="tab-btn" onclick="switchTab('tleSites')">TLE Sites</button>
-            <button class="tab-btn" onclick="switchTab('account')">Account</button>
+            <button class="tab-btn active" data-tab="satellites" onclick="switchTab('satellites', event)">Satellites</button>
+            <button class="tab-btn" data-tab="sensors" onclick="switchTab('sensors', event)">Sensors</button>
+            <button class="tab-btn" data-tab="tle" onclick="switchTab('tle', event)">TLE Data</button>
+            <button class="tab-btn" data-tab="tleSites" onclick="switchTab('tleSites', event)">TLE Sites</button>
         </div>
 
         <!-- Satellites Tab -->
@@ -406,7 +409,7 @@
             <div class="action-bar">
                 <h2>TLE Data</h2>
                 <div>
-                    <button class="btn btn-success" onclick="autoUpdateTLEs()" style="margin-right: 10px;">🔄 Auto Update from Sites</button>
+                    <button class="btn btn-success" onclick="autoUpdateTLEs()" style="margin-right: 10px;">🔄 Auto Update (Default Feed)</button>
                     <button class="btn btn-primary" onclick="openBulkTLEModal()">✏️ Manual Update</button>
                 </div>
             </div>
@@ -425,26 +428,6 @@
             <div id="tleSitesContent"></div>
         </div>
 
-        <!-- Account Tab -->
-        <div id="account" class="tab-content">
-            <div class="action-bar">
-                <h2>Account Settings</h2>
-            </div>
-            
-            <div class="card">
-                <h3>User Information</h3>
-                <div id="userInfoContent">
-                    <div class="loading">Loading user information...</div>
-                </div>
-            </div>
-
-            <div class="card" style="margin-top: 20px;">
-                <h3>Security</h3>
-                <div style="padding: 20px;">
-                    <button class="btn btn-primary" onclick="openChangePasswordModal()">Change Password</button>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Satellite Modal -->
@@ -564,64 +547,6 @@ HUBBLE
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeBulkTLEModal()">Cancel</button>
                     <button type="submit" class="btn btn-success">Update TLEs</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Change Password Modal -->
-    <div id="changePasswordModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <div class="modal-header">
-                <h2>Change Password</h2>
-            </div>
-            <div id="changePasswordModalError"></div>
-            <form id="changePasswordForm">
-                <div class="form-group">
-                    <label for="currentPassword">Current Password *</label>
-                    <input type="password" id="currentPassword" required>
-                </div>
-                <div class="form-group">
-                    <label for="newPassword">New Password *</label>
-                    <input type="password" id="newPassword" required minlength="6">
-                    <small>Password must be at least 6 characters long</small>
-                </div>
-                <div class="form-group">
-                    <label for="confirmPassword">Confirm New Password *</label>
-                    <input type="password" id="confirmPassword" required minlength="6">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Change Password</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Change Password Modal -->
-    <div id="changePasswordModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <div class="modal-header">
-                <h2>Change Password</h2>
-            </div>
-            <div id="changePasswordModalError"></div>
-            <form id="changePasswordForm">
-                <div class="form-group">
-                    <label for="currentPassword">Current Password *</label>
-                    <input type="password" id="currentPassword" required>
-                </div>
-                <div class="form-group">
-                    <label for="newPassword">New Password *</label>
-                    <input type="password" id="newPassword" required minlength="6">
-                    <small>Password must be at least 6 characters long</small>
-                </div>
-                <div class="form-group">
-                    <label for="confirmPassword">Confirm New Password *</label>
-                    <input type="password" id="confirmPassword" required minlength="6">
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Change Password</button>
                 </div>
             </form>
         </div>

@@ -1,17 +1,108 @@
 // API configuration
-const API_BASE = '/api/v1';
-let authToken = localStorage.getItem('authToken');
+function resolveApiBase() {
+    const { protocol, hostname, port } = window.location;
+
+    if (protocol === 'file:') {
+        return `http://localhost:8080/api/v1`;
+    }
+
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (isLocalHost && port && port !== '8080') {
+        return `${protocol}//${hostname}:8080/api/v1`;
+    }
+
+    return '/api/v1';
+}
+
+const API_BASE = resolveApiBase();
 let currentEditId = null;
+const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+
+const getAdminToken = () => localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+
+const setAdminToken = (token) => {
+    if (token) {
+        localStorage.setItem(ADMIN_TOKEN_KEY, token);
+    } else {
+        localStorage.removeItem(ADMIN_TOKEN_KEY);
+    }
+};
+
+const showLogin = (message = '') => {
+    const loginPanel = document.getElementById('loginPanel');
+    const adminPanel = document.getElementById('adminPanel');
+    const loginError = document.getElementById('loginError');
+
+    if (adminPanel) {
+        adminPanel.classList.add('hidden');
+    }
+    if (loginPanel) {
+        loginPanel.classList.remove('hidden');
+    }
+    if (loginError) {
+        loginError.textContent = message;
+        loginError.style.display = message ? 'block' : 'none';
+    }
+};
+
+const showAdmin = () => {
+    const loginPanel = document.getElementById('loginPanel');
+    const adminPanel = document.getElementById('adminPanel');
+
+    if (loginPanel) {
+        loginPanel.classList.add('hidden');
+    }
+    if (adminPanel) {
+        adminPanel.classList.remove('hidden');
+    }
+};
+
+const verifyAdminCredentials = async (credentials) => {
+    const username = credentials?.username?.trim() || '';
+    const password = credentials?.password || '';
+    if (!username || !password) {
+        return { ok: false, message: 'Please enter username and password.' };
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        });
+
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok) {
+            return {
+                ok: false,
+                message: payload?.message || payload?.error || 'Authentication failed.'
+            };
+        }
+
+        const token = payload?.data?.token;
+        if (!token) {
+            return { ok: false, message: 'Login succeeded but no token was returned.' };
+        }
+
+        return { ok: true, token };
+    } catch (error) {
+        return { ok: false, message: 'Unable to reach the admin API.' };
+    }
+};
 
 // API helper function
 async function apiCall(endpoint, options = {}) {
+    const token = getAdminToken();
     const headers = {
         'Content-Type': 'application/json',
         ...options.headers
     };
 
-    if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
     }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -19,70 +110,97 @@ async function apiCall(endpoint, options = {}) {
         headers
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+    let data = null;
+    try {
+        data = rawText ? JSON.parse(rawText) : null;
+    } catch (error) {
+        data = { message: rawText };
+    }
+
+    if (response.status === 401) {
+        setAdminToken('');
+        showLogin('Session expired. Please log in again.');
+    }
 
     if (!response.ok) {
-        // Handle expired/invalid token - redirect to login
-        if (response.status === 401) {
-            localStorage.removeItem('authToken');
-            authToken = null;
-            document.getElementById('loginContainer').style.display = 'block';
-            document.getElementById('adminPanel').style.display = 'none';
-            const loginError = document.getElementById('loginError');
-            if (loginError) {
-                loginError.innerHTML = '<div class="error">Session expired. Please login again.</div>';
-            }
-        }
-        throw new Error(data.message || 'API request failed');
+        throw new Error(data?.message || data?.error || 'API request failed');
     }
 
-    return data;
+    return data?.data ?? null;
 }
 
-// Login functionality
-document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const errorDiv = document.getElementById('loginError');
+// Initial load
+const startAdmin = () => {
+    initializeAuth();
+};
 
-    try {
-        const response = await apiCall('/login', {
-            method: 'POST',
-            body: JSON.stringify({ username, password })
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startAdmin);
+} else {
+    startAdmin();
+}
+
+function initializeAuth() {
+    const loginForm = document.getElementById('loginForm');
+    const loginUsername = document.getElementById('loginUsername');
+    const loginPassword = document.getElementById('loginPassword');
+
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const username = loginUsername?.value.trim() || '';
+            const password = loginPassword?.value || '';
+
+            const submitButton = loginForm.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Checking...';
+            }
+
+            const result = await verifyAdminCredentials({ username, password });
+            if (result.ok) {
+                setAdminToken(result.token);
+                showAdmin();
+                loadAllData();
+            } else {
+                showLogin(result.message || 'Authentication failed.');
+            }
+
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Login';
+            }
         });
-
-        if (response.success && response.data.token) {
-            authToken = response.data.token;
-            localStorage.setItem('authToken', authToken);
-            document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('adminPanel').style.display = 'block';
-            loadAllData();
-        }
-    } catch (error) {
-        errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
     }
-});
 
-// Check if already logged in
-if (authToken) {
-    document.getElementById('loginContainer').style.display = 'none';
-    document.getElementById('adminPanel').style.display = 'block';
-    loadAllData();
+    const existingToken = getAdminToken();
+    if (existingToken) {
+        apiCall('/user/me').then(() => {
+            showAdmin();
+            loadAllData();
+        }).catch((error) => {
+            setAdminToken('');
+            showLogin(error.message || 'Authentication failed.');
+        });
+    } else {
+        showLogin();
+    }
 }
 
 // Tab switching
-function switchTab(tabName) {
+function switchTab(tabName, evt) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    
-    event.target.classList.add('active');
+
+    const targetButton = evt?.target || document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if (targetButton) {
+        targetButton.classList.add('active');
+    }
     document.getElementById(tabName).classList.add('active');
-    
+
     // Load data when switching to specific tabs
-    if (tabName === 'account') {
-        loadUserInfo();
-    } else if (tabName === 'tleSites') {
+    if (tabName === 'tleSites') {
         loadTLESites();
     }
 }
@@ -105,7 +223,7 @@ async function loadSatellites() {
 
     try {
         const response = await apiCall('/sat/all');
-        const satellites = response.data || [];
+        const satellites = response || [];
 
         loading.style.display = 'none';
 
@@ -182,17 +300,16 @@ async function editSatellite(id) {
     document.getElementById('satelliteModalError').innerHTML = '';
 
     try {
-        const response = await apiCall(`/sat/${id}`);
-        const sat = response.data;
+        const sat = await apiCall(`/sat/${id}`);
 
         document.getElementById('satName').value = sat.name;
         document.getElementById('satHexColor').value = sat.hex_color;
         
         // For edit mode, we need to fetch TLE data
         try {
-            const tleResponse = await apiCall(`/tle/sat/${sat.noard_id}`);
-            if (tleResponse.data && tleResponse.data.length > 0) {
-                const tle = tleResponse.data[0];
+            const tleResponse = await apiCall(`/tle/sat/${encodeURIComponent(sat.noard_id)}`);
+            if (Array.isArray(tleResponse) && tleResponse.length > 0) {
+                const tle = tleResponse[0];
                 const tleText = `${sat.name}\n${tle.line1}\n${tle.line2}`;
                 document.getElementById('satTLEData').value = tleText;
                 document.getElementById('satParsedNoradID').value = sat.noard_id;
@@ -363,7 +480,7 @@ async function loadSensors() {
 
     try {
         const response = await apiCall('/sen/all');
-        const sensors = response.data || [];
+        const sensors = response || [];
 
         loading.style.display = 'none';
 
@@ -432,7 +549,7 @@ async function loadSatellitesIntoSelect() {
     
     try {
         const response = await apiCall('/sat/all');
-        const satellites = response.data || [];
+        const satellites = response || [];
         
         selectElement.innerHTML = '<option value="">Select a satellite...</option>';
         satellites.forEach(sat => {
@@ -473,8 +590,7 @@ async function editSensor(id) {
         // Load satellites into dropdown first
         await loadSatellitesIntoSelect();
         
-        const response = await apiCall(`/sen/${id}`);
-        const sen = response.data;
+        const sen = await apiCall(`/sen/${id}`);
 
         document.getElementById('senSatelliteSelect').value = sen.sat_noard_id;
         document.getElementById('senName').value = sen.name;
@@ -557,7 +673,7 @@ async function loadTLEs() {
 
     try {
         const response = await apiCall('/tle/all');
-        const tles = response.data || [];
+        const tles = response || [];
 
         loading.style.display = 'none';
 
@@ -636,12 +752,8 @@ async function autoUpdateTLEs() {
             method: 'POST'
         });
 
-        let message = response.message;
-        if (response.data && response.data.failed_sites && response.data.failed_sites.length > 0) {
-            message += `\nWarning: Failed to fetch from sites: ${response.data.failed_sites.join(', ')}`;
-        }
-        
-        showToast(message, 'success');
+        const count = response?.inserted ?? 0;
+        showToast(`Refreshed ${count} TLE record(s)`, 'success');
         loadTLEs();
     } catch (error) {
         showToast('Auto-update failed: ' + error.message, 'error');
@@ -727,19 +839,14 @@ document.getElementById('bulkTLEForm').addEventListener('submit', async (e) => {
         }
 
         // Send to backend
-        const response = await apiCall('/sat/tle/update', {
+        await apiCall('/sat/tle/update', {
             method: 'POST',
             body: JSON.stringify(tleData)
         });
 
         closeBulkTLEModal();
-        
-        let message = `Updated ${response.data.inserted} TLE record(s)`;
-        if (response.data.skipped > 0) {
-            message += ` (${response.data.skipped} skipped)`;
-        }
-        
-        showToast(message, 'success');
+
+        showToast(`Updated ${tleData.length} TLE record(s)`, 'success');
         loadTLEs();
     } catch (error) {
         errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
@@ -766,7 +873,7 @@ async function loadTLESites() {
 
     try {
         const response = await apiCall('/tle/sites');
-        const sites = response.data || [];
+        const sites = response || [];
 
         loading.style.display = 'none';
 
@@ -839,8 +946,7 @@ async function editTLESite(id) {
     document.getElementById('tleSiteModalError').innerHTML = '';
 
     try {
-        const response = await apiCall(`/tle/sites/${id}`);
-        const site = response.data;
+        const site = await apiCall(`/tle/sites/${id}`);
 
         document.getElementById('tleSiteName').value = site.site;
         document.getElementById('tleSiteURL').value = site.url;
@@ -894,83 +1000,6 @@ document.getElementById('tleSiteForm').addEventListener('submit', async (e) => {
 
         closeTLESiteModal();
         loadTLESites();
-    } catch (error) {
-        errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
-    }
-});
-
-// ==================== ACCOUNT ====================
-
-async function loadUserInfo() {
-    const content = document.getElementById('userInfoContent');
-    
-    content.innerHTML = '<div class="loading">Loading user information...</div>';
-
-    try {
-        const response = await apiCall('/user/me');
-        const user = response.data;
-
-        content.innerHTML = `
-            <div style="padding: 20px;">
-                <div style="margin-bottom: 15px;">
-                    <strong>Username:</strong> ${user.username}
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <strong>Email:</strong> ${user.email || 'Not set'}
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <strong>User ID:</strong> ${user.id}
-                </div>
-            </div>
-        `;
-    } catch (error) {
-        content.innerHTML = `<div class="error" style="margin: 20px;">${error.message}</div>`;
-    }
-}
-
-function openChangePasswordModal() {
-    document.getElementById('changePasswordModal').classList.add('active');
-    document.getElementById('changePasswordForm').reset();
-    document.getElementById('changePasswordModalError').innerHTML = '';
-}
-
-function closeChangePasswordModal() {
-    document.getElementById('changePasswordModal').classList.remove('active');
-}
-
-// Handle change password form submission
-document.getElementById('changePasswordForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errorDiv = document.getElementById('changePasswordModalError');
-    errorDiv.innerHTML = '';
-
-    const currentPassword = document.getElementById('currentPassword').value;
-    const newPassword = document.getElementById('newPassword').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
-
-    // Validate passwords match
-    if (newPassword !== confirmPassword) {
-        errorDiv.innerHTML = '<div class="error">New passwords do not match</div>';
-        return;
-    }
-
-    // Validate password length
-    if (newPassword.length < 6) {
-        errorDiv.innerHTML = '<div class="error">Password must be at least 6 characters long</div>';
-        return;
-    }
-
-    try {
-        const response = await apiCall('/user/password', {
-            method: 'PUT',
-            body: JSON.stringify({
-                current_password: currentPassword,
-                new_password: newPassword
-            })
-        });
-
-        closeChangePasswordModal();
-        showToast('Password changed successfully', 'success');
     } catch (error) {
         errorDiv.innerHTML = `<div class="error">${error.message}</div>`;
     }

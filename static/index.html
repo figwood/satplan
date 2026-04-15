@@ -23,6 +23,16 @@
         
         <div class="map-container">
             <div class="map-controls">
+                <div class="control-group">
+                    <label for="baseMapSource">Base Map:</label>
+                    <select id="baseMapSource">
+                        <option value="osm" selected>OpenStreetMap</option>
+                        <option value="google">Google Road</option>
+                        <option value="googleSatellite">Google Satellite</option>
+                        <option value="bing">Bing Road</option>
+                        <option value="bingSatellite">Bing Satellite</option>
+                    </select>
+                </div>
                 <div class="control-group zoom-controls">
                     <button id="zoomInBtn" class="zoom-btn" title="Zoom In">+</button>
                     <button id="zoomOutBtn" class="zoom-btn" title="Zoom Out">−</button>
@@ -41,7 +51,7 @@
                     </select>
                 </div>
                 <div class="control-group">
-                    <button id="drawAreaBtn" class="control-btn">
+                    <button id="drawAreaBtn" class="control-btn" disabled>
                         <span id="btnIcon">📐</span>
                         <span id="btnText">Draw Planning Area</span>
                     </button>

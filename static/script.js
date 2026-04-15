@@ -1,18 +1,185 @@
-// API Base URL
-const API_BASE = '/api/v1';
+const TLE_CACHE_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8 hours
+const ADMIN_TOKEN_KEY = 'satplan_admin_token';
+
+function resolveApiBase() {
+    const { protocol, hostname, port } = window.location;
+
+    if (protocol === 'file:') {
+        return 'http://localhost:8080/api/v1';
+    }
+
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (isLocalHost && port && port !== '8080') {
+        return `${protocol}//${hostname}:8080/api/v1`;
+    }
+
+    return '/api/v1';
+}
+
+const API_BASE = resolveApiBase();
+
+const EMBEDDED_TREE_DATA = {
+    id: 0,
+    type: 'root',
+    name: 'Satellites',
+    children: [
+        {
+            id: 1,
+            type: 'satellite',
+            name: 'HJ-1A',
+            hex_color: '#2563eb',
+            sat_norad_id: '33321',
+            tle1: '1 33321U 08041B   26039.21169248  .00002209  00000+0  27521-3 0  9990',
+            tle2: '2 33321  97.6452  33.6805 0034993 246.1151 113.6395 14.83026247939297',
+            children: [
+                {
+                    id: 101,
+                    type: 'sensor',
+                    name: 'CCD1',
+                    hex_color: '#f97316',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 30.0,
+                    init_angle: -14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 102,
+                    type: 'sensor',
+                    name: 'CCD2',
+                    hex_color: '#10b981',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 30.0,
+                    init_angle: 14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 103,
+                    type: 'sensor',
+                    name: 'HSI',
+                    hex_color: '#1fee81',
+                    sat_norad_id: '33321',
+                    sat_name: 'HJ-1A',
+                    resolution: 10.0,
+                    init_angle: 0.0,
+                    left_side_angle: 30.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 4.5
+                }
+            ]
+        },
+        {
+            id: 2,
+            type: 'satellite',
+            name: 'HJ-1B',
+            hex_color: '#0ea5e9',
+            sat_norad_id: '33320',
+            tle1: '1 33320U 08041A   26039.16302942  .00001368  00000+0  17158-3 0  9993',
+            tle2: '2 33320  97.6601  30.0900 0018300 198.0175 162.0394 14.83620033939272',
+            children: [
+                {
+                    id: 201,
+                    type: 'sensor',
+                    name: 'CCD1',
+                    hex_color: '#c026d3',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30,
+                    init_angle: -14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 202,
+                    type: 'sensor',
+                    name: 'CCD2',
+                    hex_color: '#fbbf24',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30.0,
+                    init_angle: 14.5,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 30.0
+                },
+                {
+                    id: 203,
+                    type: 'sensor',
+                    name: 'IRS',
+                    hex_color: '#a4ff2e',
+                    sat_norad_id: '33320',
+                    sat_name: 'HJ-1B',
+                    resolution: 30.0,
+                    init_angle: 0.0,
+                    left_side_angle: 0.0,
+                    cur_side_angle: 0.0,
+                    observe_angle: 60.0
+                }
+            ]
+        }
+    ]
+};
 
 // Data storage
 let treeData = null;
 let map = null;
+let baseMapLayer = null;
 let drawInteraction = null;
 let vectorSource = null;
 let vectorLayer = null;
+let solarOverlaySource = null;
+let solarOverlayLayer = null;
+let solarRefreshTimer = null;
+let solarOverlayReferenceTimeMs = null;
 let isDrawing = false;
 let planningDays = 3;
 let planningArea = null;
+let availableBaseMaps = ['osm', 'google', 'googleSatellite', 'bing', 'bingSatellite'];
+let activeBaseMapKey = 'osm';
+
+const BASE_MAP_DEFINITIONS = {
+    osm: {
+        label: 'OpenStreetMap',
+        createSource: () => new ol.source.OSM()
+    },
+    google: {
+        label: 'Google Road',
+        createSource: () => new ol.source.XYZ({
+            url: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+            maxZoom: 20,
+            crossOrigin: 'anonymous',
+            attributions: 'Google'
+        })
+    },
+    googleSatellite: {
+        label: 'Google Satellite',
+        createSource: () => new ol.source.XYZ({
+            url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+            maxZoom: 20,
+            crossOrigin: 'anonymous',
+            attributions: 'Google'
+        })
+    },
+    bing: {
+        label: 'Bing Road',
+        createSource: () => createBingTileSource('r')
+    },
+    bingSatellite: {
+        label: 'Bing Satellite',
+        createSource: () => createBingTileSource('a')
+    }
+};
 
 // Satpath WebAssembly module
 let satpathModule = null;
+let satpathReady = false;
+let lastSuccessfulTLEUpdate = null;
 
 // Initialize satpath WASM module
 async function initSatpath() {
@@ -20,8 +187,11 @@ async function initSatpath() {
         console.log('Initializing satpath WebAssembly module...');
         satpathModule = await createModule();
         console.log('Satpath module initialized successfully');
+        satpathReady = true;
+        setDrawButtonState(true);
     } catch (error) {
         console.error('Failed to initialize satpath module:', error);
+        setDrawButtonState(false);
     }
 }
 
@@ -31,7 +201,142 @@ document.addEventListener('DOMContentLoaded', function() {
     initMap();
     loadTreeData();
     initControls();
+    setDrawButtonState(false);
 });
+
+function scheduleMapResize() {
+    if (!map) {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        map.updateSize();
+    });
+}
+
+function getFullMapExtent() {
+    const projection = ol.proj.get('EPSG:3857');
+    const projectionExtent = projection?.getExtent?.();
+    if (projectionExtent) {
+        return projectionExtent.slice();
+    }
+
+    return ol.proj.transformExtent([-180, -85, 180, 85], 'EPSG:4326', projection);
+}
+
+function getBaseLayerMinZoom() {
+    if (!map) {
+        return null;
+    }
+
+    const baseLayer = map.getLayers().item(0);
+    const source = baseLayer?.getSource?.();
+    const tileGrid = source?.getTileGrid?.();
+
+    if (tileGrid && typeof tileGrid.getMinZoom === 'function') {
+        return tileGrid.getMinZoom();
+    }
+
+    return null;
+}
+
+function createBingTileSource(imageryPrefix) {
+    return new ol.source.XYZ({
+        maxZoom: 19,
+        crossOrigin: 'anonymous',
+        attributions: 'Bing',
+        tileUrlFunction: tileCoord => createBingTileUrl(tileCoord, imageryPrefix)
+    });
+}
+
+function createBingTileUrl(tileCoord, imageryPrefix = 'r') {
+    if (!tileCoord) {
+        return undefined;
+    }
+
+    const z = tileCoord[0];
+    const x = tileCoord[1];
+    const y = tileCoord[2];
+    const quadKey = tileXYToQuadKey(x, y, z);
+    const subdomain = Math.abs((x + y) % 4);
+
+    return `https://ecn.t${subdomain}.tiles.virtualearth.net/tiles/${imageryPrefix}${quadKey}.jpeg?g=13239&mkt=en-US&n=z`;
+}
+
+function tileXYToQuadKey(x, y, z) {
+    let quadKey = '';
+
+    for (let index = z; index > 0; index -= 1) {
+        let digit = 0;
+        const mask = 1 << (index - 1);
+
+        if ((x & mask) !== 0) {
+            digit += 1;
+        }
+
+        if ((y & mask) !== 0) {
+            digit += 2;
+        }
+
+        quadKey += digit.toString();
+    }
+
+    return quadKey;
+}
+
+function getBaseMapDefinition(baseMapKey) {
+    return BASE_MAP_DEFINITIONS[baseMapKey] || BASE_MAP_DEFINITIONS.osm;
+}
+
+function syncBaseMapSelect() {
+    const baseMapSelect = document.getElementById('baseMapSource');
+    if (!baseMapSelect) {
+        return;
+    }
+
+    const optionsMarkup = availableBaseMaps
+        .map(baseMapKey => {
+            const definition = getBaseMapDefinition(baseMapKey);
+            const selected = baseMapKey === activeBaseMapKey ? ' selected' : '';
+            return `<option value="${baseMapKey}"${selected}>${definition.label}</option>`;
+        })
+        .join('');
+
+    baseMapSelect.innerHTML = optionsMarkup;
+    baseMapSelect.value = activeBaseMapKey;
+}
+
+function setBaseMapSource(baseMapKey) {
+    const resolvedKey = availableBaseMaps.includes(baseMapKey) ? baseMapKey : 'osm';
+    const definition = getBaseMapDefinition(resolvedKey);
+
+    activeBaseMapKey = resolvedKey;
+    if (baseMapLayer) {
+        baseMapLayer.setSource(definition.createSource());
+    }
+
+    syncBaseMapSelect();
+
+    if (!map) {
+        return;
+    }
+
+    const minZoom = getBaseLayerMinZoom();
+    const view = map.getView();
+    if (typeof minZoom === 'number' && view.getZoom() < minZoom) {
+        view.setZoom(minZoom);
+    }
+}
+
+function setDrawButtonState(enabled) {
+    const drawAreaBtn = document.getElementById('drawAreaBtn');
+    if (!drawAreaBtn) {
+        return;
+    }
+
+    drawAreaBtn.disabled = !enabled;
+    drawAreaBtn.classList.toggle('disabled', !enabled);
+}
 
 // Initialize OpenLayers map
 function initMap() {
@@ -50,26 +355,21 @@ function initMap() {
         })
     });
 
-    // Check if local tiles exist by testing a sample tile
-    let baseMapSource;
-    const testImage = new Image();
-    testImage.onload = function() {
-        // Local tiles exist, switch to them
-        const localSource = new ol.source.XYZ({
-            url: 'tiles/{z}/{x}/{-y}.png',
-            minZoom: 1,
-            maxZoom: 4,
-            attributions: 'Local Tiles'
-        });
-        map.getLayers().getArray()[0].setSource(localSource);
-    };
-    testImage.onerror = function() {
-        // Local tiles don't exist, keep using OSM (already set as default)
-    };
-    testImage.src = 'tiles/1/0/0.png';
+    solarOverlaySource = new ol.source.Vector({
+        wrapX: true
+    });
+    solarOverlayLayer = new ol.layer.Vector({
+        source: solarOverlaySource,
+        style: getSolarFeatureStyle,
+        updateWhileAnimating: true,
+        updateWhileInteracting: true
+    });
+    solarOverlayLayer.setZIndex(5);
+    vectorLayer.setZIndex(10);
 
-    // Default to OSM, will be replaced if local tiles are found
-    baseMapSource = new ol.source.OSM();
+    baseMapLayer = new ol.layer.Tile({
+        source: getBaseMapDefinition(activeBaseMapKey).createSource()
+    });
 
     map = new ol.Map({
         target: 'map',
@@ -79,16 +379,20 @@ function initMap() {
             rotate: true
         }),
         layers: [
-            new ol.layer.Tile({
-                source: baseMapSource
-            }),
+            baseMapLayer,
+            solarOverlayLayer,
             vectorLayer
         ],
         view: new ol.View({
             center: ol.proj.fromLonLat([0, 0]),
-            zoom: 2
+            zoom: 2,
+            multiWorld: true
         })
     });
+
+    syncBaseMapSelect();
+
+    window.addEventListener('resize', scheduleMapResize);
 
     // Add mouse move listener to update coordinates
     map.on('pointermove', function(evt) {
@@ -109,10 +413,247 @@ function initMap() {
             tableLabel.textContent = coordText;
         }
     });
+
+    updateSolarOverlay();
+    solarRefreshTimer = window.setInterval(updateSolarOverlay, 60000);
+}
+
+function getSolarFeatureStyle(feature) {
+    const featureType = feature.get('featureType');
+
+    if (featureType === 'night') {
+        return new ol.style.Style({
+            fill: new ol.style.Fill({
+                color: 'rgba(0, 0, 0, 0.24)'
+            })
+        });
+    }
+
+    if (featureType === 'terminator') {
+        return new ol.style.Style({
+            stroke: new ol.style.Stroke({
+                color: 'rgba(245, 158, 11, 0.95)',
+                width: 2,
+                lineDash: [8, 8]
+            })
+        });
+    }
+
+    if (featureType === 'sun') {
+        return [
+            new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 16,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 196, 0, 0.3)'
+                    })
+                })
+            }),
+            new ol.style.Style({
+                image: new ol.style.RegularShape({
+                    points: 8,
+                    radius: 12,
+                    radius2: 6,
+                    angle: Math.PI / 8,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 149, 0, 0.98)'
+                    }),
+                    stroke: new ol.style.Stroke({
+                        color: 'rgba(255, 248, 220, 1)',
+                        width: 2
+                    })
+                })
+            }),
+            new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 7,
+                    fill: new ol.style.Fill({
+                        color: 'rgba(255, 244, 122, 1)'
+                    }),
+                    stroke: new ol.style.Stroke({
+                        color: 'rgba(255, 255, 255, 1)',
+                        width: 2
+                    })
+                })
+            })
+        ];
+    }
+
+    return null;
+}
+
+function resolveSolarOverlayTime(explicitTime) {
+    if (explicitTime instanceof Date) {
+        return new Date(explicitTime.getTime());
+    }
+
+    if (typeof explicitTime === 'number' && Number.isFinite(explicitTime)) {
+        return new Date(explicitTime);
+    }
+
+    if (typeof solarOverlayReferenceTimeMs === 'number' && Number.isFinite(solarOverlayReferenceTimeMs)) {
+        return new Date(solarOverlayReferenceTimeMs);
+    }
+
+    return new Date();
+}
+
+function setSolarOverlayReferenceTime(timestampMs) {
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) {
+        return;
+    }
+
+    solarOverlayReferenceTimeMs = timestampMs;
+    updateSolarOverlay();
+}
+
+function resetSolarOverlayToNow() {
+    solarOverlayReferenceTimeMs = null;
+    updateSolarOverlay();
+}
+
+function updateSolarOverlay(explicitTime) {
+    if (!map || !solarOverlaySource) {
+        return;
+    }
+
+    const now = resolveSolarOverlayTime(explicitTime);
+    const sunPosition = calculateSunPosition(now);
+    const terminatorPoints = getTerminatorPoints(sunPosition.lat, sunPosition.lng);
+    const features = [];
+
+    features.push(new ol.Feature({
+        geometry: buildNightGeometry(terminatorPoints, sunPosition.lat),
+        featureType: 'night'
+    }));
+
+    features.push(new ol.Feature({
+        geometry: new ol.geom.LineString(
+            terminatorPoints.map(([lat, lng]) => ol.proj.fromLonLat([lng, lat]))
+        ),
+        featureType: 'terminator'
+    }));
+
+    features.push(new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat([sunPosition.lng, sunPosition.lat])),
+        featureType: 'sun'
+    }));
+
+    solarOverlaySource.clear(true);
+    solarOverlaySource.addFeatures(features);
+    updateSolarInfo(now, sunPosition);
+}
+
+function buildNightGeometry(terminatorPoints, sunLat) {
+    const poleLat = sunLat > 0 ? -90 : 90;
+    const points = sunLat > 0 ? terminatorPoints : [...terminatorPoints].reverse();
+    const ring = points.map(([lat, lng]) => ol.proj.fromLonLat([lng, lat]));
+    const lastPoint = points[points.length - 1];
+    const firstPoint = points[0];
+
+    ring.push(ol.proj.fromLonLat([lastPoint[1], poleLat]));
+    ring.push(ol.proj.fromLonLat([firstPoint[1], poleLat]));
+    ring.push(ring[0]);
+
+    return new ol.geom.Polygon([ring]);
+}
+
+function updateSolarInfo(date, sunPosition) {
+    const timeEl = document.getElementById('solarTime');
+    const coordsEl = document.getElementById('solarCoords');
+
+    if (timeEl) {
+        timeEl.textContent = `UTC: ${date.toUTCString()}`;
+    }
+
+    if (coordsEl) {
+        coordsEl.textContent = `Sun: ${formatSignedDegrees(sunPosition.lat, 'N', 'S')}, ${formatSignedDegrees(sunPosition.lng, 'E', 'W')}`;
+    }
+}
+
+function formatSignedDegrees(value, positiveSuffix, negativeSuffix) {
+    const suffix = value >= 0 ? positiveSuffix : negativeSuffix;
+    return `${Math.abs(value).toFixed(2)}°${suffix}`;
+}
+
+function getJulianDay(date) {
+    const a = Math.floor((14 - (date.getUTCMonth() + 1)) / 12);
+    const year = date.getUTCFullYear() + 4800 - a;
+    const month = date.getUTCMonth() + 1 + 12 * a - 3;
+
+    const julianDayNumber = date.getUTCDate()
+        + Math.floor((153 * month + 2) / 5)
+        + 365 * year
+        + Math.floor(year / 4)
+        - Math.floor(year / 100)
+        + Math.floor(year / 400)
+        - 32045;
+
+    return julianDayNumber
+        + (date.getUTCHours() - 12) / 24
+        + date.getUTCMinutes() / 1440
+        + date.getUTCSeconds() / 86400;
+}
+
+function calculateSunPosition(date) {
+    const julianDay = getJulianDay(date);
+    const elapsedDays = julianDay - 2451545.0;
+    const meanLongitude = (280.46 + 0.9856474 * elapsedDays) % 360;
+    const meanAnomaly = ((357.528 + 0.9856003 * elapsedDays) % 360) * Math.PI / 180;
+    const eclipticLongitude = (meanLongitude + 1.915 * Math.sin(meanAnomaly) + 0.02 * Math.sin(2 * meanAnomaly)) * Math.PI / 180;
+    const obliquity = (23.439 - 0.0000004 * elapsedDays) * Math.PI / 180;
+    const declination = Math.asin(Math.sin(obliquity) * Math.sin(eclipticLongitude)) * 180 / Math.PI;
+    const rightAscension = Math.atan2(
+        Math.cos(obliquity) * Math.sin(eclipticLongitude),
+        Math.cos(eclipticLongitude)
+    ) * 180 / Math.PI;
+    const greenwichMeanSiderealTime = (18.697374558 + 24.06570982441908 * elapsedDays) % 24;
+
+    let longitude = -(greenwichMeanSiderealTime * 15 - rightAscension);
+    while (longitude > 180) {
+        longitude -= 360;
+    }
+    while (longitude < -180) {
+        longitude += 360;
+    }
+
+    return {
+        lat: declination,
+        lng: longitude
+    };
+}
+
+function getTerminatorPoints(sunLat, sunLng, segments = 360) {
+    const points = [];
+    const sunLatRadians = sunLat * Math.PI / 180;
+    const tangent = Math.tan(sunLatRadians);
+
+    for (let index = 0; index <= segments; index += 1) {
+        const lng = -180 + (index * 360 / segments);
+        let deltaLng = lng - sunLng;
+
+        while (deltaLng > 180) {
+            deltaLng -= 360;
+        }
+        while (deltaLng < -180) {
+            deltaLng += 360;
+        }
+
+        const lat = Math.atan(-Math.cos(deltaLng * Math.PI / 180) / tangent) * 180 / Math.PI;
+        points.push([lat, lng]);
+    }
+
+    return points;
 }
 
 // Initialize controls
 function initControls() {
+    const baseMapSelect = document.getElementById('baseMapSource');
+    syncBaseMapSelect();
+    baseMapSelect.addEventListener('change', function(e) {
+        setBaseMapSource(e.target.value);
+    });
+
     // Planning days select
     const planningDaysSelect = document.getElementById('planningDays');
     planningDaysSelect.addEventListener('change', function(e) {
@@ -145,10 +686,89 @@ function initControls() {
     // Export button
     const exportBtn = document.getElementById('exportBtn');
     exportBtn.addEventListener('click', exportToPDF);
+
+    // TLE refresh is now automatic during planning
+}
+
+async function refreshTLEData(options = {}) {
+    const { notifyOnError = false, showStatus = false } = options;
+    try {
+        const token = localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+        if (showStatus) {
+            showTLEFeedback('Refreshing TLE data…', 'info');
+        }
+        const response = await fetch(`${API_BASE}/tle/auto-update`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const payload = await response.json();
+        const timestamp = Date.now();
+
+        const fetched = await fetchTreeFromD1();
+        if (fetched && fetched.tree) {
+            treeData = normalizeTreeData(fetched.tree);
+        }
+
+        if (typeof fetched?.tleLastSync === 'number') {
+            lastSuccessfulTLEUpdate = fetched.tleLastSync;
+        } else if (timestamp) {
+            lastSuccessfulTLEUpdate = timestamp;
+        }
+
+        const preserved = getCheckedSensorIds();
+        renderTree(preserved);
+
+        if (planningArea && isResultsTableVisible()) {
+            refreshResults();
+        }
+
+        if (showStatus) {
+            updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
+            showTLEFeedback('TLE data refreshed successfully', 'success');
+        }
+        return true;
+    } catch (error) {
+        console.error('Failed to refresh TLE data:', error);
+        if (showStatus) {
+            showTLEFeedback(`Failed to refresh TLE: ${error.message}`, 'error');
+        }
+        if (notifyOnError) {
+            console.log(`Failed to refresh TLE data: ${error.message}`);
+        }
+        return false;
+    }
+}
+
+async function ensureTLEFreshForPlanning(planningStartMs) {
+    const planTime = typeof planningStartMs === 'number' ? planningStartMs : Date.now();
+    const lastSync = typeof lastSuccessfulTLEUpdate === 'number' ? lastSuccessfulTLEUpdate : null;
+
+    if (!lastSync) {
+        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+    }
+
+    const isStaleForPlan = planTime - lastSync > TLE_CACHE_MAX_AGE_MS;
+    if (isStaleForPlan) {
+        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+    }
+
+    return true;
 }
 
 // Toggle draw mode
 function toggleDrawMode() {
+    if (!satpathReady) {
+        console.warn('Satpath module still loading; please wait before drawing.');
+        return;
+    }
     const drawAreaBtn = document.getElementById('drawAreaBtn');
     const btnIcon = document.getElementById('btnIcon');
     const btnText = document.getElementById('btnText');
@@ -222,31 +842,158 @@ function toggleDrawMode() {
 // Load tree data
 async function loadTreeData() {
     const loadingEl = document.getElementById('treeLoading');
-    const treeEl = document.getElementById('tree');
-    
-    loadingEl.style.display = 'block';
-    
-    try {
-        const response = await fetch(`${API_BASE}/sat/tree`);
-        const data = await response.json();
-        
-        loadingEl.style.display = 'none';
-        
-        if (data.success && data.data) {
-            treeData = data.data;
-            renderTree();
-        } else {
-            treeEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #EF4444;">Failed to load data</p>';
-        }
-    } catch (error) {
-        loadingEl.style.display = 'none';
-        console.error('Error loading tree data:', error);
-        treeEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #EF4444;">Error loading data</p>';
+    if (loadingEl) {
+        loadingEl.style.display = 'block';
     }
+
+    const fetchedTree = await fetchTreeFromD1();
+    if (fetchedTree && fetchedTree.tree) {
+        treeData = normalizeTreeData(fetchedTree.tree);
+        lastSuccessfulTLEUpdate = fetchedTree.tleLastSync ?? null;
+    } else {
+        treeData = normalizeTreeData(cloneEmbeddedTree());
+        lastSuccessfulTLEUpdate = null;
+    }
+
+    renderTree();
+
+    if (loadingEl) {
+        loadingEl.style.display = 'none';
+    }
+
+    updateTLEStatusFromCache(lastSuccessfulTLEUpdate);
+}
+
+function cloneEmbeddedTree() {
+    return JSON.parse(JSON.stringify(EMBEDDED_TREE_DATA));
+}
+
+function normalizeTreeData(node) {
+    if (!node || typeof node !== 'object') {
+        return node;
+    }
+
+    const normalized = { ...node };
+
+    if (normalized.type === 'sensor') {
+        normalized.sat_norad_id = normalized.sat_norad_id || normalized.sat_noard_id || '';
+        normalized.sat_noard_id = normalized.sat_noard_id || normalized.sat_norad_id || '';
+        normalized.init_angle = normalized.init_angle ?? 0.0;
+        normalized.left_side_angle = normalized.left_side_angle ?? 0.0;
+        normalized.cur_side_angle = normalized.cur_side_angle ?? normalized.left_side_angle ?? 0.0;
+        normalized.observe_angle = normalized.observe_angle ?? 0.0;
+    }
+
+    if (Array.isArray(normalized.children)) {
+        normalized.children = normalized.children.map(child => normalizeTreeData(child));
+    }
+
+    return normalized;
+}
+
+async function fetchTreeFromD1() {
+    try {
+        const response = await fetch(`${API_BASE}/sat/tree`, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const payload = await response.json();
+        if (payload && payload.data && payload.data.type === 'root') {
+            return {
+                tree: payload.data,
+                tleLastSync: null
+            };
+        }
+
+        console.warn('SatPlan: unexpected payload from API');
+    } catch (error) {
+        console.error('SatPlan: failed to fetch tree data from API', error);
+    }
+
+    return null;
+}
+
+function applyTLERecords(node, records) {
+    if (!node || !records || records.length === 0) {
+        return;
+    }
+
+    const recordMap = {};
+    records.forEach(record => {
+        if (record.noradId) {
+            recordMap[record.noradId] = record;
+        }
+    });
+
+    const walk = (current) => {
+        if (current.type === 'satellite' && current.sat_norad_id) {
+            const record = recordMap[current.sat_norad_id];
+            if (record) {
+                current.tle1 = record.line1;
+                current.tle2 = record.line2;
+            }
+        }
+
+        if (Array.isArray(current.children)) {
+            current.children.forEach(child => walk(child));
+        }
+    };
+
+    walk(node);
+}
+
+function updateTLEStatusFromCache(timestamp) {
+    if (!timestamp) {
+        showTLEFeedback('Embedded snapshot is in use. Refresh to fetch live TLEs.', 'info');
+        updateLastSyncLabel(null);
+        return;
+    }
+
+    const stale = isCacheStale(timestamp);
+    const message = stale
+        ? 'Stored TLE data is stale. Refresh when needed.'
+        : 'Stored TLE data is loaded.';
+    const severity = stale ? 'warning' : 'success';
+    showTLEFeedback(message, severity);
+    updateLastSyncLabel(timestamp);
+}
+
+function showTLEFeedback(message, severity = 'info') {
+    const statusEl = document.getElementById('tleStatusMessage');
+    if (!statusEl) {
+        return;
+    }
+
+    statusEl.textContent = message;
+    statusEl.classList.remove('info', 'success', 'error', 'warning');
+    statusEl.classList.add(severity);
+}
+
+function updateLastSyncLabel(timestamp) {
+    const label = document.getElementById('tleLastSync');
+    if (!label) {
+        return;
+    }
+
+    if (!timestamp) {
+        label.textContent = 'Last sync: embedded snapshot';
+        return;
+    }
+
+    label.textContent = `Last sync: ${formatDateTime(new Date(timestamp))} UTC`;
+}
+
+function isCacheStale(timestamp) {
+    if (!timestamp) {
+        return false;
+    }
+
+    return Date.now() - timestamp > TLE_CACHE_MAX_AGE_MS;
 }
 
 // Render tree view
-function renderTree() {
+function renderTree(checkedSensorIds = []) {
     const treeEl = document.getElementById('tree');
     
     if (!treeData) {
@@ -255,6 +1002,24 @@ function renderTree() {
     }
     
     treeEl.innerHTML = renderTreeNode(treeData);
+
+    if (checkedSensorIds && checkedSensorIds.length > 0) {
+        restoreCheckedSensors(checkedSensorIds);
+    }
+}
+
+function restoreCheckedSensors(sensorIds) {
+    if (!sensorIds || sensorIds.length === 0) {
+        return;
+    }
+
+    sensorIds.forEach(sensorId => {
+        const checkbox = document.getElementById(`check-sensor-${sensorId}`);
+        if (checkbox) {
+            checkbox.checked = true;
+            updateParentSatelliteState(sensorId);
+        }
+    });
 }
 
 // Render a tree node recursively
@@ -459,12 +1224,29 @@ function zoomOut() {
 }
 
 function zoomToFullExtent() {
+    if (!map) {
+        return;
+    }
+
     const view = map.getView();
-    view.animate({
-        center: ol.proj.fromLonLat([0, 0]),
-        zoom: 2,
+    const fullExtent = getFullMapExtent();
+    if (!fullExtent) {
+        return;
+    }
+
+    map.updateSize();
+    view.cancelAnimations();
+    view.fit(fullExtent, {
+        size: map.getSize(),
+        padding: [16, 16, 16, 16],
+        nearest: true,
         duration: 500
     });
+
+    const minZoom = getBaseLayerMinZoom();
+    if (typeof minZoom === 'number' && view.getZoom() < minZoom) {
+        view.setZoom(minZoom);
+    }
 }
 
 function clearMap() {
@@ -508,43 +1290,14 @@ async function callSensorInRegion(area) {
             return;
         }
         
-        // Create Calculator instance
-        const calc = new satpathModule.Calculator();
-        
-        // Create TargetArea with west, east, north, south
-        const targetArea = new satpathModule.TargetArea(
-            area.minLon, // west
-            area.maxLon, // east
-            area.maxLat, // north
-            area.minLat  // south
-        );
-        
-        // Create VectorSensor and populate with checked sensors
-        const vecSensors = new satpathModule.VectorSensor();
-        checkedSensors.forEach(s => {
-            const sideAngle = s.cur_side_angle ?? s.left_side_angle ?? 0.0;
-            const observeAngle = s.observe_angle ?? 60.0;
-            const sensor = new satpathModule.Sensor(
-                s.sat_norad_id || '',
-                s.id,
-                s.sat_name || '',
-                s.name,
-                s.init_angle || 0.0,
-                sideAngle,
-                observeAngle
-            );
-            if (sensor.setHexColor) {
-                sensor.setHexColor(s.hex_color || '#000000');
-            }
-            vecSensors.push_back(sensor);
-        });
-        
         // Time range: use current UTC date at 00:00:00 + planning days
         const now = new Date();
         const utcStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
         const utcEndDate = new Date(utcStartDate.getTime() + planningDays * 24 * 60 * 60 * 1000);
         const utcStartTime = Math.floor(utcStartDate.getTime() / 1000);
         const utcEndTime = Math.floor(utcEndDate.getTime() / 1000);
+
+        await ensureTLEFreshForPlanning(utcStartDate.getTime());
         
         // For each satellite with checked sensors, compute regions
         const satelliteGroups = groupSensorsBySatellite(checkedSensors);
@@ -554,17 +1307,59 @@ async function callSensorInRegion(area) {
             if (!satInfo.tle1 || !satInfo.tle2) {
                 continue;
             }
-            
-            const regions = calc.SensorInRegion(
-                String(satId),
-                String(satInfo.name),
-                String(satInfo.tle1),
-                String(satInfo.tle2),
-                vecSensors,
-                utcStartTime,
-                utcEndTime,
-                targetArea
+
+            // Create a fresh Calculator and TargetArea per satellite.
+            // TargetArea is passed by value into SensorInRegion (C++ side), so the copy
+            // constructor must deep-copy the owned Color* members — this is fixed in the
+            // C++ source so each copy owns its own Color objects and double-free is avoided.
+            const calc = new satpathModule.Calculator();
+            const targetArea = new satpathModule.TargetArea(
+                area.minLon, // west
+                area.maxLon, // east
+                area.maxLat, // north
+                area.minLat  // south
             );
+
+            const vecSensors = new satpathModule.VectorSensor();
+            satInfo.sensors.forEach(sensorInfo => {
+                const sideAngle = sensorInfo.cur_side_angle ?? sensorInfo.left_side_angle ?? 0.0;
+                const observeAngle = sensorInfo.observe_angle ?? 60.0;
+                const sensor = new satpathModule.Sensor(
+                    sensorInfo.sat_norad_id || '',
+                    sensorInfo.id,
+                    sensorInfo.sat_name || '',
+                    sensorInfo.name,
+                    sensorInfo.init_angle || 0.0,
+                    sideAngle,
+                    observeAngle
+                );
+                if (sensor.setHexColor) {
+                    sensor.setHexColor(sensorInfo.hex_color || '#000000');
+                }
+                vecSensors.push_back(sensor);
+                // Do NOT call sensor.delete(): push_back copy-constructs into the vector;
+                // the JS wrapper's finalizer will handle the original if GC'd.
+            });
+
+            let regions = null;
+            try {
+                regions = calc.SensorInRegion(
+                    String(satId),
+                    String(satInfo.name),
+                    String(satInfo.tle1),
+                    String(satInfo.tle2),
+                    vecSensors,
+                    utcStartTime,
+                    utcEndTime,
+                    targetArea
+                );
+            } catch (innerErr) {
+                console.error(`Error in SensorInRegion for sat ${satId}:`, innerErr);
+                if (typeof vecSensors.delete === 'function') vecSensors.delete();
+                if (typeof targetArea.delete === 'function') targetArea.delete();
+                if (typeof calc.delete === 'function') calc.delete();
+                throw innerErr;
+            }
             
             // Extract region data
             if (regions && typeof regions.size === 'function') {
@@ -596,7 +1391,13 @@ async function callSensorInRegion(area) {
                         satName: String(satInfo.name),
                     });
                 }
+                // Do NOT call regions.delete(): the returned vector is owned by the Emscripten
+                // binding wrapper and will be freed when it goes out of scope or is GC'd.
             }
+
+            if (typeof vecSensors.delete === 'function') vecSensors.delete();
+            if (typeof targetArea.delete === 'function') targetArea.delete();
+            if (typeof calc.delete === 'function') calc.delete();
         }
         
         // Display regions on map
@@ -625,6 +1426,10 @@ function getCheckedSensors() {
     });
     
     return sensors;
+}
+
+function getCheckedSensorIds() {
+    return getCheckedSensors().map(sensor => sensor.id);
 }
 
 // Find sensor by ID in tree data
@@ -664,7 +1469,7 @@ function groupSensorsBySatellite(sensors) {
     const groups = {};
     
     sensors.forEach(sensor => {
-        const satNoradId = sensor.sat_noard_id;
+        const satNoradId = sensor.sat_norad_id;
         if (!groups[satNoradId]) {
             // Find the satellite node to get TLE data
             const satNode = findSatelliteByNoradId(treeData, satNoradId);
@@ -765,6 +1570,7 @@ function displayResultsTable(regions, sensors) {
         if (tableCoordLabel) {
             tableCoordLabel.style.display = 'block';
         }
+        scheduleMapResize();
         return;
     }
     
@@ -827,12 +1633,17 @@ function displayResultsTable(regions, sensors) {
     if (tableCoordLabel) {
         tableCoordLabel.style.display = 'block';
     }
+
+    scheduleMapResize();
 }
 
 // Hide results table
 function hideResultsTable() {
     const resultsContainer = document.getElementById('resultsContainer');
     resultsContainer.style.display = 'none';
+
+    // When planning results are cleared/hidden, restore real-time solar overlay.
+    resetSolarOverlayToNow();
     
     // Disable export button
     const exportBtn = document.getElementById('exportBtn');
@@ -849,6 +1660,8 @@ function hideResultsTable() {
     if (tableCoordLabel) {
         tableCoordLabel.style.display = 'none';
     }
+
+    scheduleMapResize();
 }
 
 // Check if results table is visible
@@ -924,6 +1737,9 @@ function highlightRegion(region, clickedRow) {
             }));
         }
     });
+
+    // Show terminator at this scan strip's start time.
+    setSolarOverlayReferenceTime(region.startTimestamp * 1000);
 }
 
 // Export results to PDF
