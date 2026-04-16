@@ -867,7 +867,8 @@ async function ensureTLEFreshForPlanning(planningStartMs) {
 
     const isStaleForPlan = planTime - lastSync > TLE_CACHE_MAX_AGE_MS;
     if (isStaleForPlan) {
-        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+        // TLEs exist but are stale – kick off background refresh and proceed immediately
+        refreshTLEData({ notifyOnError: false, showStatus: false }).catch(() => {});
     }
 
     return true;

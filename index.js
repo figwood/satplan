@@ -1,6 +1,6 @@
 const DEFAULT_SAT_COLOR = '#3B82F6';
 const DEFAULT_SENSOR_COLOR = '#94A3B8';
-const TLE_REQUEST_TIMEOUT_MS = 12000;
+const TLE_REQUEST_TIMEOUT_MS = 8000;
 const TLE_UPDATE_URLS = [
   'https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=tle',
   'https://celestrak.org/NORAD/elements/resource.txt'
@@ -203,7 +203,8 @@ const fetchTleFeedText = async () => {
 const fetchTleRecordForNoradId = async (noradId) => {
   const response = await fetchWithTimeout(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(noradId)}&FORMAT=tle`, {
     headers: {
-      accept: 'text/plain'
+      accept: 'text/plain',
+      'user-agent': 'Mozilla/5.0 (compatible; satplan/1.0; +https://satplan.fogsea.cf)'
     }
   });
 
@@ -242,21 +243,8 @@ const fetchTleRecords = async (allowedIds) => {
     }
   });
 
-  if (!failedIds.length) {
-    return directRecords;
-  }
-
-  const feedText = await fetchTleFeedText();
-  const feedRecords = parseTleFeed(feedText);
-  const feedMap = new Map(
-    feedRecords.map((record) => [normalizeNoradId(record.noradId), record])
-  );
-
-  const fallbackRecords = failedIds
-    .map((noradId) => feedMap.get(noradId))
-    .filter(Boolean);
-
-  return directRecords.concat(fallbackRecords);
+  // Return whatever per-satellite queries succeeded; callers handle partial results
+  return directRecords;
 };
 
 export default {
@@ -309,7 +297,7 @@ export default {
           });
         } catch (error) {
           console.error('TLE refresh error', error);
-          return jsonResponse({ error: 'Failed to refresh TLE data' }, 500);
+          return jsonResponse({ error: `Failed to refresh TLE data: ${error.message}` }, 503);
         }
       }
 
