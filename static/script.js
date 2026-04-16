@@ -228,6 +228,7 @@ let availableBaseMaps = ['osm', 'google', 'googleSatellite', 'bing', 'bingSatell
 let activeBaseMapKey = 'osm';
 let allPlanningRegions = [];
 let allPlanningSensors = [];
+let currentTableRegions = [];
 
 const BASE_MAP_DEFINITIONS = {
     osm: {
@@ -1701,6 +1702,9 @@ function displayResultsTable(regions, sensors) {
     // Sort regions by start time
     const sortedRegions = [...regions].sort((a, b) => a.startTimestamp - b.startTimestamp);
     
+    // Track the current table regions for checkbox selection
+    currentTableRegions = sortedRegions;
+
     // Add rows for each region
     sortedRegions.forEach((region, index) => {
         const sensor = sensorMap[region.sensorId];
@@ -1715,6 +1719,7 @@ function displayResultsTable(regions, sensors) {
         const resolution = sensor ? (sensor.resolution || 'N/A') : 'N/A';
         
         row.innerHTML = `
+            <td class="select-col"><input type="checkbox" class="row-select-cb" checked></td>
             <td>${region.satName}</td>
             <td>${sensorName}</td>
             <td>${resolution}</td>
@@ -1725,13 +1730,35 @@ function displayResultsTable(regions, sensors) {
         // Store region data on the row for later access
         row.dataset.regionIndex = index;
         
-        // Add click handler
-        row.addEventListener('click', function() {
+        // Checkbox click: update map, do not bubble to row click handler
+        row.querySelector('.row-select-cb').addEventListener('change', function(e) {
+            e.stopPropagation();
+            syncSelectAllCheckbox();
+            updateMapFromTableSelection();
+        });
+
+        // Add click handler (skip if click was on checkbox)
+        row.addEventListener('click', function(e) {
+            if (e.target.classList.contains('row-select-cb')) return;
             highlightRegion(region, row);
         });
         
         resultsTableBody.appendChild(row);
     });
+
+    // Wire up the select-all checkbox
+    const selectAllCb = document.getElementById('selectAllRows');
+    if (selectAllCb) {
+        // Replace to remove any old listener
+        const freshCb = selectAllCb.cloneNode(true);
+        freshCb.checked = true;
+        selectAllCb.parentNode.replaceChild(freshCb, selectAllCb);
+        freshCb.addEventListener('change', function() {
+            const allCbs = document.querySelectorAll('#resultsTableBody .row-select-cb');
+            allCbs.forEach(cb => { cb.checked = freshCb.checked; });
+            updateMapFromTableSelection();
+        });
+    }
     
     // Show the results container
     resultsContainer.style.display = 'flex';
@@ -1780,6 +1807,7 @@ function hideResultsTable() {
     }
     allPlanningRegions = [];
     allPlanningSensors = [];
+    currentTableRegions = [];
     // Show the map coordinate label and hide table coordinate label
     const mapCoordLabel = document.getElementById('mapCoordinateLabel');
     if (mapCoordLabel) {
@@ -1881,6 +1909,12 @@ function exportToPDF() {
         return;
     }
 
+    const selectedRegions = getSelectedTableRegions();
+    if (selectedRegions.length === 0) {
+        console.log('No rows selected for export.');
+        return;
+    }
+
     // Get jsPDF
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -1911,14 +1945,17 @@ function exportToPDF() {
     const rows = resultsTableBody.querySelectorAll('tr');
     
     rows.forEach(row => {
+        const cb = row.querySelector('.row-select-cb');
+        if (cb && !cb.checked) return;
         const cells = row.querySelectorAll('td');
-        if (cells.length >= 5) {
+        // Skip the first cell (checkbox column); data starts at index 1
+        if (cells.length >= 6) {
             tableData.push([
-                cells[0].textContent, // Satellite
-                cells[1].textContent, // Sensor
-                cells[2].textContent, // Resolution
-                cells[3].textContent, // Start Time
-                cells[4].textContent  // Stop Time
+                cells[1].textContent, // Satellite
+                cells[2].textContent, // Sensor
+                cells[3].textContent, // Resolution
+                cells[4].textContent, // Start Time
+                cells[5].textContent  // Stop Time
             ]);
         }
     });
@@ -2064,5 +2101,46 @@ function redrawRegionsOnMap(regions) {
     }
     if (regions && regions.length > 0) {
         displayRegionsOnMap(regions);
+    }
+}
+
+/**
+ * Return the subset of currentTableRegions whose row checkbox is checked.
+ */
+function getSelectedTableRegions() {
+    const checkboxes = document.querySelectorAll('#resultsTableBody .row-select-cb');
+    const selected = [];
+    checkboxes.forEach((cb, i) => {
+        if (cb.checked && currentTableRegions[i]) {
+            selected.push(currentTableRegions[i]);
+        }
+    });
+    return selected;
+}
+
+/**
+ * Redraw the map using only the currently checked rows in the results table.
+ */
+function updateMapFromTableSelection() {
+    redrawRegionsOnMap(getSelectedTableRegions());
+}
+
+/**
+ * Keep the select-all header checkbox in sync with individual row checkboxes.
+ */
+function syncSelectAllCheckbox() {
+    const allCbs = Array.from(document.querySelectorAll('#resultsTableBody .row-select-cb'));
+    const selectAllCb = document.getElementById('selectAllRows');
+    if (!selectAllCb || allCbs.length === 0) return;
+    const checkedCount = allCbs.filter(cb => cb.checked).length;
+    if (checkedCount === 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    } else if (checkedCount === allCbs.length) {
+        selectAllCb.checked = true;
+        selectAllCb.indeterminate = false;
+    } else {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = true;
     }
 }

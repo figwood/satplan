@@ -253,6 +253,18 @@ body {
     border-bottom: none;
 }
 
+.results-table .select-col {
+    width: 36px;
+    text-align: center;
+    padding: 10px 6px;
+}
+
+.results-table .select-col input[type="checkbox"] {
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+}
+
 .map-controls {
     position: absolute;
     top: 10px;
