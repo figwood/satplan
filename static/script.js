@@ -96,7 +96,9 @@ function normalizeTreeData(node) {
     }
 
     if (Array.isArray(normalized.children)) {
-        normalized.children = normalized.children.map(child => normalizeTreeData(child));
+        normalized.children = normalized.children
+            .map(child => normalizeTreeData(child))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
     return normalized;
