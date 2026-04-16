@@ -479,6 +479,79 @@ body {
     opacity: 0.6;
 }
 
+.auto-select-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: #d97706;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.auto-select-btn:hover:not(:disabled) {
+    background: #b45309;
+}
+
+.auto-select-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.auto-select-btn:disabled {
+    background: var(--border-color);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.auto-select-dialog {
+    min-width: 300px;
+}
+
+.auto-select-select-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+}
+
+.auto-select-label {
+    font-size: 14px;
+    color: #374151;
+    white-space: nowrap;
+}
+
+.auto-select-select {
+    flex: 1;
+    padding: 7px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #374151;
+    background: white;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.auto-select-select:focus {
+    border-color: #d97706;
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15);
+}
+
+.auto-select-confirm-btn {
+    background: #d97706 !important;
+}
+
+.auto-select-confirm-btn:hover {
+    background: #b45309 !important;
+}
+
 .filter-overlay {
     position: fixed;
     inset: 0;

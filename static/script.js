@@ -787,6 +787,23 @@ function initControls() {
         if (e.target === this) closeFilterDialog();
     });
 
+    // Auto-select button
+    const autoSelectBtn = document.getElementById('autoSelectBtn');
+    autoSelectBtn.addEventListener('click', openAutoSelectDialog);
+
+    // Auto-select dialog buttons
+    document.getElementById('autoSelectCancelBtn').addEventListener('click', closeAutoSelectDialog);
+    document.getElementById('autoSelectConfirmBtn').addEventListener('click', function() {
+        const constraint = document.getElementById('autoSelectConstraint').value;
+        closeAutoSelectDialog();
+        greedyAutoSelect(constraint);
+    });
+
+    // Close auto-select dialog when clicking the overlay background
+    document.getElementById('autoSelectDialog').addEventListener('click', function(e) {
+        if (e.target === this) closeAutoSelectDialog();
+    });
+
     // TLE refresh is now automatic during planning
 }
 
@@ -1670,7 +1687,7 @@ function displayResultsTable(regions, sensors) {
         // Show empty table with headers only
         resultsContainer.style.display = 'flex';
         
-        // Disable export and filter buttons when no results
+        // Disable export, filter, and auto-select buttons when no results
         const exportBtn = document.getElementById('exportBtn');
         if (exportBtn) {
             exportBtn.disabled = true;
@@ -1678,6 +1695,10 @@ function displayResultsTable(regions, sensors) {
         const filterBtn = document.getElementById('filterBtn');
         if (filterBtn) {
             filterBtn.disabled = true;
+        }
+        const autoSelectBtn = document.getElementById('autoSelectBtn');
+        if (autoSelectBtn) {
+            autoSelectBtn.disabled = true;
         }
         
         // Show table coordinate label
@@ -1763,7 +1784,7 @@ function displayResultsTable(regions, sensors) {
     // Show the results container
     resultsContainer.style.display = 'flex';
     
-    // Enable export and filter buttons
+    // Enable export, filter, and auto-select buttons
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
         exportBtn.disabled = false;
@@ -1771,6 +1792,10 @@ function displayResultsTable(regions, sensors) {
     const filterBtn = document.getElementById('filterBtn');
     if (filterBtn) {
         filterBtn.disabled = allPlanningRegions.length === 0;
+    }
+    const autoSelectBtnEnable = document.getElementById('autoSelectBtn');
+    if (autoSelectBtnEnable) {
+        autoSelectBtnEnable.disabled = allPlanningRegions.length === 0;
     }
     
     // Hide the map coordinate label and show table coordinate label
@@ -1800,10 +1825,14 @@ function hideResultsTable() {
         exportBtn.disabled = true;
     }
 
-    // Disable filter button and clear stored results
+    // Disable filter and auto-select buttons and clear stored results
     const filterBtn = document.getElementById('filterBtn');
     if (filterBtn) {
         filterBtn.disabled = true;
+    }
+    const autoSelectBtnDisable = document.getElementById('autoSelectBtn');
+    if (autoSelectBtnDisable) {
+        autoSelectBtnDisable.disabled = true;
     }
     allPlanningRegions = [];
     allPlanningSensors = [];
@@ -2143,4 +2172,129 @@ function syncSelectAllCheckbox() {
         selectAllCb.checked = false;
         selectAllCb.indeterminate = true;
     }
+}
+
+// ── Auto-select dialog ────────────────────────────────────────────────────────
+
+function openAutoSelectDialog() {
+    document.getElementById('autoSelectDialog').classList.remove('hidden');
+}
+
+function closeAutoSelectDialog() {
+    document.getElementById('autoSelectDialog').classList.add('hidden');
+}
+
+// Point-in-polygon (ray casting)
+function pointInPolygon(point, polygon) {
+    const x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0], yi = polygon[i][1];
+        const xj = polygon[j][0], yj = polygon[j][1];
+        if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// Build a grid of sample points over the planning area and compute per-region coverage
+function computeGridCoverage(regions, area, gridSize) {
+    const points = [];
+    const dLon = (area.maxLon - area.minLon) / (gridSize - 1);
+    const dLat = (area.maxLat - area.minLat) / (gridSize - 1);
+    for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+            points.push([area.minLon + i * dLon, area.minLat + j * dLat]);
+        }
+    }
+    const regionCoveredPoints = regions.map(region => {
+        const covered = new Set();
+        if (region.coordinates && region.coordinates.length >= 3) {
+            points.forEach((pt, idx) => {
+                if (pointInPolygon(pt, region.coordinates)) covered.add(idx);
+            });
+        }
+        return covered;
+    });
+    return { points, regionCoveredPoints };
+}
+
+/**
+ * Greedy auto-select strips from the current results table.
+ * constraint: 'max-coverage' | 'min-time' | 'min-strips'
+ */
+function greedyAutoSelect(constraint) {
+    if (!planningArea || !currentTableRegions || currentTableRegions.length === 0) return;
+
+    const regions = currentTableRegions;
+    const GRID = 25;
+    const { regionCoveredPoints } = computeGridCoverage(regions, planningArea, GRID);
+    const totalPoints = GRID * GRID;
+
+    const selected = new Set();
+    const remaining = new Set(regions.map((_, i) => i));
+    const coveredPoints = new Set();
+
+    if (constraint === 'max-coverage') {
+        // Greedy set cover – pick strip with most NEW coverage; include all that contribute
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestGain = 0;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain > bestGain) { bestGain = gain; bestIdx = idx; }
+            }
+            if (bestIdx === -1 || bestGain === 0) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    } else if (constraint === 'min-time') {
+        // Greedy: at each step pick the strip with the best coverage-per-second ratio,
+        // so the cumulative observation time spent is minimized while coverage grows fast.
+        // Stop when no strip adds any new coverage.
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestRatio = -1;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain === 0) { remaining.delete(idx); continue; }
+                const dur = Math.max(1, regions[idx].endTimestamp - regions[idx].startTimestamp);
+                const ratio = gain / dur;
+                if (ratio > bestRatio) { bestRatio = ratio; bestIdx = idx; }
+            }
+            if (bestIdx === -1) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    } else if (constraint === 'min-strips') {
+        // Greedy set cover – stop when marginal gain drops below 1 % of total grid points
+        const threshold = Math.max(1, Math.floor(totalPoints * 0.01));
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestGain = 0;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain > bestGain) { bestGain = gain; bestIdx = idx; }
+            }
+            if (bestIdx === -1 || bestGain < threshold) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    }
+
+    // Apply selection to table checkboxes and refresh map
+    const checkboxes = document.querySelectorAll('#resultsTableBody .row-select-cb');
+    checkboxes.forEach((cb, i) => { cb.checked = selected.has(i); });
+    syncSelectAllCheckbox();
+    updateMapFromTableSelection();
 }
