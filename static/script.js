@@ -226,6 +226,8 @@ let planningDays = 3;
 let planningArea = null;
 let availableBaseMaps = ['osm', 'google', 'googleSatellite', 'bing', 'bingSatellite'];
 let activeBaseMapKey = 'osm';
+let allPlanningRegions = [];
+let allPlanningSensors = [];
 
 const BASE_MAP_DEFINITIONS = {
     osm: {
@@ -770,6 +772,19 @@ function initControls() {
     // Export button
     const exportBtn = document.getElementById('exportBtn');
     exportBtn.addEventListener('click', exportToPDF);
+
+    // Filter button
+    const filterBtn = document.getElementById('filterBtn');
+    filterBtn.addEventListener('click', openFilterDialog);
+
+    // Filter dialog buttons
+    document.getElementById('filterCancelBtn').addEventListener('click', closeFilterDialog);
+    document.getElementById('filterConfirmBtn').addEventListener('click', applyFilter);
+
+    // Close filter dialog when clicking the overlay background
+    document.getElementById('filterDialog').addEventListener('click', function(e) {
+        if (e.target === this) closeFilterDialog();
+    });
 
     // TLE refresh is now automatic during planning
 }
@@ -1498,6 +1513,10 @@ async function callSensorInRegion(area) {
         // Display regions on map
         displayRegionsOnMap(allRegions);
         
+        // Save all results globally for filtering
+        allPlanningRegions = allRegions;
+        allPlanningSensors = checkedSensors;
+
         // Display results in table
         displayResultsTable(allRegions, checkedSensors);
         
@@ -1650,10 +1669,14 @@ function displayResultsTable(regions, sensors) {
         // Show empty table with headers only
         resultsContainer.style.display = 'flex';
         
-        // Disable export button when no results
+        // Disable export and filter buttons when no results
         const exportBtn = document.getElementById('exportBtn');
         if (exportBtn) {
             exportBtn.disabled = true;
+        }
+        const filterBtn = document.getElementById('filterBtn');
+        if (filterBtn) {
+            filterBtn.disabled = true;
         }
         
         // Show table coordinate label
@@ -1713,10 +1736,14 @@ function displayResultsTable(regions, sensors) {
     // Show the results container
     resultsContainer.style.display = 'flex';
     
-    // Enable export button
+    // Enable export and filter buttons
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
         exportBtn.disabled = false;
+    }
+    const filterBtn = document.getElementById('filterBtn');
+    if (filterBtn) {
+        filterBtn.disabled = allPlanningRegions.length === 0;
     }
     
     // Hide the map coordinate label and show table coordinate label
@@ -1745,7 +1772,14 @@ function hideResultsTable() {
     if (exportBtn) {
         exportBtn.disabled = true;
     }
-    
+
+    // Disable filter button and clear stored results
+    const filterBtn = document.getElementById('filterBtn');
+    if (filterBtn) {
+        filterBtn.disabled = true;
+    }
+    allPlanningRegions = [];
+    allPlanningSensors = [];
     // Show the map coordinate label and hide table coordinate label
     const mapCoordLabel = document.getElementById('mapCoordinateLabel');
     if (mapCoordLabel) {
@@ -1937,4 +1971,98 @@ function exportToPDF() {
 
     // Save the PDF
     doc.save(filename);
+}
+
+// ── Filter feature ────────────────────────────────────────────────────────────
+
+/**
+ * Compute the solar elevation angle (degrees) for an observer at (lat, lon)
+ * at the given Date.  Positive = sun above horizon (daytime).
+ */
+function calculateSolarElevation(lat, lon, date) {
+    const sunPos = calculateSunPosition(date);
+    const latRad = lat * Math.PI / 180;
+    const lonRad = lon * Math.PI / 180;
+    const sunLatRad = sunPos.lat * Math.PI / 180;
+    const sunLonRad = sunPos.lng * Math.PI / 180;
+    const sinElev = Math.sin(latRad) * Math.sin(sunLatRad)
+        + Math.cos(latRad) * Math.cos(sunLatRad) * Math.cos(lonRad - sunLonRad);
+    return Math.asin(Math.max(-1, Math.min(1, sinElev))) * 180 / Math.PI;
+}
+
+/**
+ * Return the centroid [lon, lat] of a region's coordinate ring.
+ */
+function getRegionCentroid(region) {
+    const coords = region.coordinates;
+    if (!coords || coords.length === 0) return [0, 0];
+    let sumLon = 0, sumLat = 0;
+    for (const [lon, lat] of coords) { sumLon += lon; sumLat += lat; }
+    return [sumLon / coords.length, sumLat / coords.length];
+}
+
+/**
+ * Return true if the region's mid-pass time is daytime at the strip centre.
+ * "Daytime" = solar elevation > 0° at the centroid.
+ */
+function isRegionDaytime(region) {
+    const [lon, lat] = getRegionCentroid(region);
+    const midMs = ((region.startTimestamp + region.endTimestamp) / 2) * 1000;
+    const midDate = new Date(midMs);
+    return calculateSolarElevation(lat, lon, midDate) > 0;
+}
+
+function openFilterDialog() {
+    // Restore checkbox state from last apply (default both checked on first open)
+    const dayBox = document.getElementById('filterDay');
+    const nightBox = document.getElementById('filterNight');
+    // Keep whatever the user last set; they are already defaulted to `checked` in HTML
+    document.getElementById('filterDialog').classList.remove('hidden');
+}
+
+function closeFilterDialog() {
+    document.getElementById('filterDialog').classList.add('hidden');
+}
+
+function applyFilter() {
+    const showDay = document.getElementById('filterDay').checked;
+    const showNight = document.getElementById('filterNight').checked;
+    closeFilterDialog();
+
+    // If both selected (or both deselected), show everything
+    if (showDay && showNight) {
+        redrawRegionsOnMap(allPlanningRegions);
+        displayResultsTable(allPlanningRegions, allPlanningSensors);
+        return;
+    }
+    if (!showDay && !showNight) {
+        redrawRegionsOnMap([]);
+        displayResultsTable([], allPlanningSensors);
+        return;
+    }
+
+    const filtered = allPlanningRegions.filter(region => {
+        const daytime = isRegionDaytime(region);
+        return (daytime && showDay) || (!daytime && showNight);
+    });
+
+    redrawRegionsOnMap(filtered);
+    displayResultsTable(filtered, allPlanningSensors);
+}
+
+/**
+ * Replace region polygons on the map with the given subset, preserving
+ * the planning-area rectangle feature.
+ */
+function redrawRegionsOnMap(regions) {
+    if (!vectorSource) return;
+    // Keep the planning-area outline (the only feature without regionData)
+    const planningAreaFeature = vectorSource.getFeatures().find(f => !f.get('regionData'));
+    vectorSource.clear();
+    if (planningAreaFeature) {
+        vectorSource.addFeature(planningAreaFeature);
+    }
+    if (regions && regions.length > 0) {
+        displayRegionsOnMap(regions);
+    }
 }

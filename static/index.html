@@ -73,6 +73,15 @@
                         </svg>
                     </button>
                 </div>
+                <div class="control-group">
+                    <button id="filterBtn" class="filter-btn" title="Filter" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 4.5H21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            <path d="M7 12H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            <path d="M10.5 19.5H13.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div id="mapCoordinateLabel" class="coordinate-label">0.00, 0.00</div>
             <div id="tableCoordinateLabel" class="coordinate-label-over-table" style="display: none;">0.00, 0.00</div>
@@ -93,6 +102,25 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Dialog -->
+    <div id="filterDialog" class="filter-overlay hidden">
+        <div class="filter-dialog">
+            <div class="filter-dialog-title">Filter Results</div>
+            <div class="filter-dialog-options">
+                <label class="filter-dialog-option">
+                    <input type="checkbox" id="filterDay" checked> Day passes
+                </label>
+                <label class="filter-dialog-option">
+                    <input type="checkbox" id="filterNight" checked> Night passes
+                </label>
+            </div>
+            <div class="filter-dialog-actions">
+                <button id="filterCancelBtn" class="filter-cancel-btn">Cancel</button>
+                <button id="filterConfirmBtn" class="filter-confirm-btn">Apply</button>
             </div>
         </div>
     </div>

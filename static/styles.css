@@ -437,6 +437,124 @@ body {
     opacity: 0.6;
 }
 
+.filter-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: #7c3aed;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.filter-btn:hover:not(:disabled) {
+    background: #6d28d9;
+}
+
+.filter-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.filter-btn:disabled {
+    background: var(--border-color);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.filter-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.filter-overlay.hidden {
+    display: none;
+}
+
+.filter-dialog {
+    background: white;
+    border-radius: 10px;
+    padding: 24px 28px;
+    min-width: 240px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.filter-dialog-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 18px;
+}
+
+.filter-dialog-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 22px;
+}
+
+.filter-dialog-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+    user-select: none;
+}
+
+.filter-dialog-option input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.filter-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.filter-cancel-btn {
+    padding: 7px 18px;
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.filter-cancel-btn:hover {
+    background: #e5e7eb;
+}
+
+.filter-confirm-btn {
+    padding: 7px 18px;
+    background: #7c3aed;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.filter-confirm-btn:hover {
+    background: #6d28d9;
+}
+
 .coordinate-label {
     position: absolute;
     bottom: 10px;
