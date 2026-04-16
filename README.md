@@ -53,6 +53,24 @@ npx wrangler dev --config wrangler.local.toml
 - When a planning result is available, the twilight line is no longer static: it is replayed alongside the planning timeline and updates continuously for each planning time step.
 - This makes it easier to judge whether each scheduled observation window happens in daylight, nighttime, or near sunrise/sunset transition zones.
 
+## Filtering and auto-selecting planning results
+
+After a planning run completes, two post-processing buttons become available in the results toolbar.
+
+### Filter by lighting condition
+The **Filter** button opens a dialog with two checkboxes — **Day** and **Night** — that let operators narrow the displayed observation windows by illumination condition. Selecting only **Day** hides every strip whose midpoint falls in the Earth's shadow; selecting only **Night** does the inverse. When both boxes are checked (the default) all results are shown. The filtered view updates both the results table and the map simultaneously.
+
+### Greedy auto-select
+The **Auto-select** button opens a dialog where operators choose an optimization objective, then runs a greedy coverage algorithm over the current results table to tick the minimal useful subset of observation strips. Three objectives are available:
+
+| Objective | Behaviour |
+|---|---|
+| **Max coverage** | Greedy set-cover: repeatedly picks the strip that adds the most new grid points to the covered area until no uncovered points remain. |
+| **Min time** | Picks strips in order of highest coverage-per-second ratio, minimising total cumulative observation time while still growing coverage at each step. |
+| **Min strips** | Like max coverage, but stops as soon as the marginal gain of the next-best strip drops below 1 % of the planning-area grid (fewest strips for near-complete coverage). |
+
+The algorithm samples the planning area on a 25 × 25 grid and uses ray-casting to test which grid points each strip polygon covers. After auto-select runs, the table checkboxes reflect the chosen subset and the map redraws to show only those strips.
+
 ## D1-backed satellite catalog
 `index.js` reads the tables inside `init.sql` and exposes a `/api/satellites` endpoint that mirrors the satellite/sensor/TLE hierarchy consumed by the planner. The endpoint is wired to the `SATPLAN_D1` binding declared in `wrangler.toml`, so deployers can ship the SQL seed, connect it to a Cloudflare D1 database, and let the UI surface live data. When the API is unreachable (for example, during local static hosting), the planner silently falls back to the embedded tree described above.
 
