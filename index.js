@@ -176,75 +176,116 @@ const fetchWithTimeout = async (url, options = {}) => {
   }
 };
 
-const fetchTleFeedText = async () => {
-  let lastError = null;
+// Try each feed URL in order; return the first set of matched records.
+// feedUrls comes from the tle_site table so the admin can change sources without a redeploy.
+const fetchTleFromFeeds = async (feedUrls, allowedIdSet) => {
+  const allUrls = Array.from(new Set([
+    ...feedUrls,
+    ...TLE_UPDATE_URLS
+  ]));
 
-  for (const url of TLE_UPDATE_URLS) {
+  for (const url of allUrls) {
     try {
       const response = await fetchWithTimeout(url, {
         headers: {
-          accept: 'text/plain'
+          accept: 'text/plain',
+          'user-agent': 'satplan/1.0'
         }
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+        console.warn(`TLE feed ${url} returned HTTP ${response.status}`);
+        continue;
       }
 
-      return await response.text();
+      const text = await response.text();
+      const records = parseTleFeed(text);
+      const matched = records.filter((r) => allowedIdSet.has(normalizeNoradId(r.noradId)));
+
+      if (matched.length > 0) {
+        console.log(`TLE feed ${url}: got ${matched.length} matching record(s)`);
+        return matched;
+      }
+
+      console.warn(`TLE feed ${url}: no matching NORAD IDs found`);
     } catch (error) {
-      lastError = new Error(`Failed to fetch ${url}: ${error.message}`);
+      console.warn(`TLE feed ${url} failed: ${error.message}`);
     }
   }
 
-  throw lastError || new Error('No TLE feed URL succeeded');
+  return [];
 };
 
-const fetchTleRecordForNoradId = async (noradId) => {
-  const response = await fetchWithTimeout(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(noradId)}&FORMAT=tle`, {
+// Per-satellite JSON API fallback (tle.ivanstanojevic.me does not block Cloudflare IPs)
+const fetchTleFromJsonApi = async (noradId) => {
+  const url = `https://tle.ivanstanojevic.me/api/tle/${encodeURIComponent(noradId)}`;
+  const response = await fetchWithTimeout(url, {
     headers: {
-      accept: 'text/plain',
-      'user-agent': 'Mozilla/5.0 (compatible; satplan/1.0; +https://satplan.fogsea.cf)'
+      accept: 'application/json',
+      'user-agent': 'satplan/1.0'
     }
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+    throw new Error(`HTTP ${response.status}`);
   }
 
-  const records = parseTleFeed(await response.text());
-  return records.find((record) => normalizeNoradId(record.noradId) === normalizeNoradId(noradId)) || null;
+  const data = await response.json();
+  if (!data.line1 || !data.line2) {
+    throw new Error('Missing line1/line2 in JSON response');
+  }
+
+  return {
+    name: data.name || `NORAD ${noradId}`,
+    line1: String(data.line1).trim(),
+    line2: String(data.line2).trim(),
+    noradId: normalizeNoradId(String(data.satelliteId || noradId))
+  };
 };
 
-const fetchTleRecords = async (allowedIds) => {
+// Main TLE fetch: try JSON API per satellite first, then fall back to feed URLs.
+const fetchTleRecords = async (db, allowedIds) => {
   const normalizedIds = Array.from(new Set((allowedIds || []).map((id) => normalizeNoradId(id)).filter((id) => id)));
   if (!normalizedIds.length) {
     return [];
   }
 
-  const directResults = await Promise.allSettled(
-    normalizedIds.map(async (noradId) => {
-      const record = await fetchTleRecordForNoradId(noradId);
-      if (!record) {
-        throw new Error(`No TLE returned for NORAD ${noradId}`);
-      }
-      return record;
-    })
+  const allowedIdSet = new Set(normalizedIds);
+
+  // 1. Try tle.ivanstanojevic.me JSON API per satellite (not blocked by Cloudflare IPs)
+  const jsonResults = await Promise.allSettled(
+    normalizedIds.map((noradId) => fetchTleFromJsonApi(noradId))
   );
 
-  const directRecords = [];
+  const jsonRecords = [];
   const failedIds = [];
 
-  directResults.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      directRecords.push(result.value);
+  jsonResults.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      jsonRecords.push(r.value);
     } else {
-      failedIds.push(normalizedIds[index]);
+      console.warn(`JSON API failed for NORAD ${normalizedIds[i]}: ${r.reason?.message}`);
+      failedIds.push(normalizedIds[i]);
     }
   });
 
-  // Return whatever per-satellite queries succeeded; callers handle partial results
-  return directRecords;
+  if (!failedIds.length) {
+    return jsonRecords;
+  }
+
+  // 2. For any IDs still missing, fall back to admin-configured feed URLs then built-in CelesTrak URLs
+  let feedUrls = [];
+  try {
+    const sitesResult = await db.prepare('SELECT url FROM tle_site WHERE url IS NOT NULL ORDER BY id').all();
+    feedUrls = (sitesResult.results || []).map((row) => (row.url || '').trim()).filter(Boolean);
+  } catch (e) {
+    console.warn('Failed to read tle_site from D1:', e.message);
+  }
+
+  const failedIdSet = new Set(failedIds);
+  const feedRecords = await fetchTleFromFeeds(feedUrls, failedIdSet);
+
+  return jsonRecords.concat(feedRecords);
 };
 
 export default {
@@ -270,16 +311,33 @@ export default {
               .map((row) => normalizeNoradId(row.noard_id))
               .filter((id) => id);
 
-          const records = await fetchTleRecords(allowedIds);
+          const records = await fetchTleRecords(db, allowedIds);
+
           if (!records.length) {
-            return jsonResponse({ error: 'No TLE records were parsed from the feed' }, 400);
+            // External TLE source unreachable (e.g. blocked by CelesTrak).
+            // Fall back to the most recent TLE already stored in D1 so planning can continue.
+            console.warn('TLE refresh: no records fetched from external source; returning cached D1 timestamp');
+            const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
+            const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
+            return jsonResponse({
+              count: 0,
+              cached: true,
+              timestamp: typeof latestTime === 'number' ? latestTime * 1000 : Date.now()
+            });
           }
 
           const allowedIdSet = new Set(allowedIds);
-
           const filteredRecords = records.filter((record) => allowedIdSet.has(normalizeNoradId(record.noradId)));
+
           if (!filteredRecords.length) {
-            return jsonResponse({ error: 'No matching satellites for TLE refresh' }, 400);
+            console.warn('TLE refresh: fetched records did not match any satellite in catalog');
+            const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
+            const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
+            return jsonResponse({
+              count: 0,
+              cached: true,
+              timestamp: typeof latestTime === 'number' ? latestTime * 1000 : Date.now()
+            });
           }
 
           const timestamp = Math.floor(Date.now() / 1000);
