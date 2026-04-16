@@ -968,3 +968,128 @@ tr:hover {
         padding: 8px;
     }
 }
+
+/* Scan Strip Side Panel */
+.strip-side-panel {
+    position: absolute;
+    right: 0;
+    top: 56px;
+    width: 260px;
+    max-height: calc(100% - 66px);
+    background: white;
+    border-radius: 8px 0 0 8px;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.18);
+    z-index: 1500;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    pointer-events: auto;
+    overflow: hidden;
+}
+
+.strip-side-panel.visible {
+    transform: translateX(0);
+}
+
+.strip-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    background: var(--light-color);
+}
+
+.strip-panel-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--dark-color);
+}
+
+.strip-panel-close {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 3px;
+    transition: color 0.15s;
+}
+
+.strip-panel-close:hover {
+    color: var(--danger-color);
+}
+
+.strip-panel-list {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.strip-panel-item {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+    border-left: 3px solid transparent;
+}
+
+.strip-panel-item:last-child {
+    border-bottom: none;
+}
+
+.strip-panel-item:hover {
+    background: var(--light-color);
+}
+
+.strip-panel-item.active {
+    background: rgba(59, 130, 246, 0.08);
+    border-left-color: var(--primary-color);
+}
+
+.strip-panel-item-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 5px;
+}
+
+.strip-panel-swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.15);
+}
+
+.strip-panel-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--dark-color);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.strip-panel-active-badge {
+    font-size: 0.7rem;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 3px;
+    padding: 1px 5px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.strip-panel-meta {
+    font-size: 0.77rem;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    line-height: 1.6;
+}

@@ -229,6 +229,7 @@ let activeBaseMapKey = 'osm';
 let allPlanningRegions = [];
 let allPlanningSensors = [];
 let currentTableRegions = [];
+// (side panel replaces popup overlay)
 
 const BASE_MAP_DEFINITIONS = {
     osm: {
@@ -499,6 +500,48 @@ function initMap() {
         if (tableLabel) {
             tableLabel.textContent = coordText;
         }
+    });
+
+    // Close button for side panel
+    document.getElementById('stripPanelClose').addEventListener('click', function() {
+        hideStripPanel();
+    });
+
+    // Click handler: collect ALL scan strips at clicked pixel
+    map.on('click', function(evt) {
+        if (!isResultsTableVisible()) return;
+
+        const foundRegions = [];
+        map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+            const regionData = feature.get('regionData');
+            if (regionData) foundRegions.push(regionData);
+        }, { layerFilter: layer => layer === vectorLayer });
+
+        if (foundRegions.length > 0) {
+            showStripPanel(foundRegions);
+        } else {
+            hideStripPanel();
+        }
+    });
+
+    // Change cursor when hovering over a scan strip
+    map.on('pointermove', function(evt) {
+        if (!isResultsTableVisible()) {
+            map.getTargetElement().style.cursor = '';
+            return;
+        }
+        const hit = map.hasFeatureAtPixel(evt.pixel, {
+            layerFilter: layer => layer === vectorLayer,
+            hitTolerance: 2
+        });
+        // Only show pointer if the feature under cursor has regionData
+        let hasStrip = false;
+        if (hit) {
+            map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+                if (feature.get('regionData')) { hasStrip = true; return true; }
+            }, { layerFilter: layer => layer === vectorLayer });
+        }
+        map.getTargetElement().style.cursor = hasStrip ? 'pointer' : '';
     });
 
     updateSolarOverlay();
@@ -1677,6 +1720,9 @@ function formatDateTime(date) {
 
 // Display results in table
 function displayResultsTable(regions, sensors) {
+    // Hide side panel whenever the displayed strip list changes
+    hideStripPanel();
+
     const resultsContainer = document.getElementById('resultsContainer');
     const resultsTableBody = document.getElementById('resultsTableBody');
     
@@ -1818,6 +1864,9 @@ function hideResultsTable() {
 
     // When planning results are cleared/hidden, restore real-time solar overlay.
     resetSolarOverlayToNow();
+
+    // Hide scan strip side panel
+    hideStripPanel();
     
     // Disable export button
     const exportBtn = document.getElementById('exportBtn');
@@ -1875,6 +1924,96 @@ function refreshResults() {
     
     // Re-run the sensor region calculation
     callSensorInRegion(planningArea);
+}
+
+// Show the scan strip side panel with a list of regions found at clicked location
+function showStripPanel(regions) {
+    const panel = document.getElementById('stripSidePanel');
+    const list = document.getElementById('stripPanelList');
+    const titleEl = document.getElementById('stripPanelTitle');
+    if (!panel || !list || !titleEl) return;
+
+    titleEl.textContent = regions.length > 1 ? `Strips (${regions.length})` : 'Strip Details';
+    list.innerHTML = '';
+
+    regions.forEach((region) => {
+        const sensor = allPlanningSensors.find(s => s.id === region.sensorId);
+        const sensorName = sensor ? sensor.name : String(region.sensorId);
+        const resolution = sensor ? (sensor.resolution ?? 'N/A') : 'N/A';
+        const startTime = formatDateTime(new Date(region.startTimestamp * 1000));
+        const stopTime = formatDateTime(new Date(region.endTimestamp * 1000));
+        const color = region.color || '#ffcc33';
+
+        const item = document.createElement('div');
+        item.className = 'strip-panel-item';
+        item.innerHTML = `
+            <div class="strip-panel-item-header">
+                <span class="strip-panel-swatch" style="background:${color};"></span>
+                <span class="strip-panel-name">${region.satName} / ${sensorName}</span>
+            </div>
+            <div class="strip-panel-meta">
+                Resolution: ${resolution} m<br>
+                Start: ${startTime}<br>
+                Stop: ${stopTime}
+            </div>
+        `;
+
+        item.addEventListener('click', function() {
+            selectStripInPanel(region, regions, item);
+        });
+
+        list.appendChild(item);
+    });
+
+    panel.classList.add('visible');
+
+    // Auto-select the first strip
+    const firstItem = list.querySelector('.strip-panel-item');
+    if (firstItem) {
+        selectStripInPanel(regions[0], regions, firstItem);
+    }
+}
+
+// Activate a strip in the side panel: update active state, highlight on map and table
+function selectStripInPanel(region, panelRegions, itemEl) {
+    const list = document.getElementById('stripPanelList');
+    if (list) {
+        list.querySelectorAll('.strip-panel-item').forEach(el => {
+            el.classList.remove('active');
+            const badge = el.querySelector('.strip-panel-active-badge');
+            if (badge) badge.remove();
+        });
+        itemEl.classList.add('active');
+        if (panelRegions.length > 1) {
+            const badge = document.createElement('span');
+            badge.className = 'strip-panel-active-badge';
+            badge.textContent = 'Active';
+            itemEl.querySelector('.strip-panel-item-header').appendChild(badge);
+        }
+    }
+
+    // Sync highlight to map and results table
+    const rowIndex = currentTableRegions.findIndex(r =>
+        r.satId === region.satId &&
+        r.sensorId === region.sensorId &&
+        r.startTimestamp === region.startTimestamp
+    );
+    if (rowIndex >= 0) {
+        const allRows = document.querySelectorAll('#resultsTableBody tr');
+        const matchingRow = Array.from(allRows).find(r => parseInt(r.dataset.regionIndex) === rowIndex);
+        if (matchingRow) {
+            highlightRegion(region, matchingRow);
+            matchingRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+}
+
+// Hide the scan strip side panel
+function hideStripPanel() {
+    const panel = document.getElementById('stripSidePanel');
+    if (panel) {
+        panel.classList.remove('visible');
+    }
 }
 
 // Highlight a region on both table and map
@@ -2297,4 +2436,5 @@ function greedyAutoSelect(constraint) {
     checkboxes.forEach((cb, i) => { cb.checked = selected.has(i); });
     syncSelectAllCheckbox();
     updateMapFromTableSelection();
+    hideStripPanel();
 }

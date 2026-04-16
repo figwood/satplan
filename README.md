@@ -53,6 +53,17 @@ npx wrangler dev --config wrangler.local.toml
 - When a planning result is available, the twilight line is no longer static: it is replayed alongside the planning timeline and updates continuously for each planning time step.
 - This makes it easier to judge whether each scheduled observation window happens in daylight, nighttime, or near sunrise/sunset transition zones.
 
+## Interactive strip details panel
+
+After a planning run completes, clicking anywhere on the map inspects the scan strips at that location:
+
+- **Single strip** — a panel slides in from the right edge of the map showing the satellite name, sensor name, resolution, start time, and stop time (UTC) for that strip.
+- **Overlapping strips** — the panel lists all strips that cover the clicked point. The first strip is selected automatically; clicking any item in the list switches the active selection.
+- **Active selection** — the selected strip is highlighted on the map (bold red outline, stronger fill) and its corresponding row in the results table is highlighted and scrolled into view.
+- **Dismiss** — click the × button in the panel header, or click an empty area of the map, to close the panel.
+
+The panel closes automatically whenever the displayed strip list changes (e.g. after applying a filter or running auto-select).
+
 ## Filtering and auto-selecting planning results
 
 After a planning run completes, two post-processing buttons become available in the results toolbar.
