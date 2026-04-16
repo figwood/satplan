@@ -1,5 +1,6 @@
 const DEFAULT_SAT_COLOR = '#3B82F6';
 const DEFAULT_SENSOR_COLOR = '#94A3B8';
+const TLE_REQUEST_TIMEOUT_MS = 12000;
 const TLE_UPDATE_URLS = [
   'https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=tle',
   'https://celestrak.org/NORAD/elements/resource.txt'
@@ -161,12 +162,26 @@ const parseTleFeed = (text) => {
   return records;
 };
 
+const fetchWithTimeout = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error(`Timed out after ${TLE_REQUEST_TIMEOUT_MS}ms`)), TLE_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const fetchTleFeedText = async () => {
   let lastError = null;
 
   for (const url of TLE_UPDATE_URLS) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: {
           accept: 'text/plain'
         }
@@ -183,6 +198,65 @@ const fetchTleFeedText = async () => {
   }
 
   throw lastError || new Error('No TLE feed URL succeeded');
+};
+
+const fetchTleRecordForNoradId = async (noradId) => {
+  const response = await fetchWithTimeout(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(noradId)}&FORMAT=tle`, {
+    headers: {
+      accept: 'text/plain'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+  }
+
+  const records = parseTleFeed(await response.text());
+  return records.find((record) => normalizeNoradId(record.noradId) === normalizeNoradId(noradId)) || null;
+};
+
+const fetchTleRecords = async (allowedIds) => {
+  const normalizedIds = Array.from(new Set((allowedIds || []).map((id) => normalizeNoradId(id)).filter((id) => id)));
+  if (!normalizedIds.length) {
+    return [];
+  }
+
+  const directResults = await Promise.allSettled(
+    normalizedIds.map(async (noradId) => {
+      const record = await fetchTleRecordForNoradId(noradId);
+      if (!record) {
+        throw new Error(`No TLE returned for NORAD ${noradId}`);
+      }
+      return record;
+    })
+  );
+
+  const directRecords = [];
+  const failedIds = [];
+
+  directResults.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      directRecords.push(result.value);
+    } else {
+      failedIds.push(normalizedIds[index]);
+    }
+  });
+
+  if (!failedIds.length) {
+    return directRecords;
+  }
+
+  const feedText = await fetchTleFeedText();
+  const feedRecords = parseTleFeed(feedText);
+  const feedMap = new Map(
+    feedRecords.map((record) => [normalizeNoradId(record.noradId), record])
+  );
+
+  const fallbackRecords = failedIds
+    .map((noradId) => feedMap.get(noradId))
+    .filter(Boolean);
+
+  return directRecords.concat(fallbackRecords);
 };
 
 export default {
@@ -202,20 +276,20 @@ export default {
         }
 
         try {
-          const text = await fetchTleFeedText();
-          const records = parseTleFeed(text);
+          const satelliteIdsResult = await db.prepare('SELECT noard_id FROM satellite WHERE noard_id IS NOT NULL').all();
+          const allowedIds =
+            (satelliteIdsResult.results || [])
+              .map((row) => normalizeNoradId(row.noard_id))
+              .filter((id) => id);
+
+          const records = await fetchTleRecords(allowedIds);
           if (!records.length) {
             return jsonResponse({ error: 'No TLE records were parsed from the feed' }, 400);
           }
 
-          const satelliteIdsResult = await db.prepare('SELECT noard_id FROM satellite WHERE noard_id IS NOT NULL').all();
-          const allowedIds = new Set(
-            (satelliteIdsResult.results || [])
-              .map((row) => normalizeNoradId(row.noard_id))
-              .filter((id) => id)
-          );
+          const allowedIdSet = new Set(allowedIds);
 
-          const filteredRecords = records.filter((record) => allowedIds.has(normalizeNoradId(record.noradId)));
+          const filteredRecords = records.filter((record) => allowedIdSet.has(normalizeNoradId(record.noradId)));
           if (!filteredRecords.length) {
             return jsonResponse({ error: 'No matching satellites for TLE refresh' }, 400);
           }

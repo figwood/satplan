@@ -19,6 +19,16 @@ function resolveGoApiBase() {
     return '/api/v1';
 }
 
+function shouldUseGoPlannerFallback() {
+    const { protocol, hostname } = window.location;
+
+    if (protocol === 'file:') {
+        return true;
+    }
+
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+}
+
 function getPlannerApiConfigs() {
     const configs = [];
     const seen = new Set();
@@ -37,12 +47,14 @@ function getPlannerApiConfigs() {
         refreshPath: '/tle/refresh'
     });
 
-    pushConfig({
-        kind: 'go',
-        base: resolveGoApiBase(),
-        treePath: '/sat/tree',
-        refreshPath: '/tle/auto-update'
-    });
+    if (shouldUseGoPlannerFallback()) {
+        pushConfig({
+            kind: 'go',
+            base: resolveGoApiBase(),
+            treePath: '/sat/tree',
+            refreshPath: '/tle/auto-update'
+        });
+    }
 
     return configs;
 }
