@@ -5,6 +5,7 @@ A production-ready mission planning tool for scheduling Earth observation satell
 ![alt text](planning.png)
 
 **Live demo**: https://satplan.fogsea.cf 
+
 **Tech stack**: Go · WebAssembly (orbital mechanics) · OpenLayers · SQLite · Helm/Kubernetes
 
 ## Features
@@ -239,6 +240,7 @@ Additional sources can be added to the `tle_site` table.
   - **Important:** Change this in production for security!
 
 ## Architecture
+
 Browser
 ├── OpenLayers map (target area selection)
 ├── WASM module (orbital mechanics, compiled from Go)
