@@ -30,6 +30,40 @@ A production-ready mission planning tool for scheduling Earth observation satell
   - Admin panel for managing satellites, sensors, and TLE data
   - Automatic TLE updates from configured external sources
 
+
+
+- **Twilight line visualization**
+   - The map can render the day-night terminator (twilight line) so operators can quickly see illumination conditions on Earth.
+   - In normal browsing mode, the terminator is drawn using the current timeline position.
+   - When a planning result is available, the twilight line is no longer static: it is replayed alongside the planning timeline and updates continuously for each planning time step.
+   - This makes it easier to judge whether each scheduled observation window happens in daylight, nighttime, or near sunrise/sunset transition zones.
+
+- **Filter by Lighting Condition**
+  - After a planning run, the **Filter** button opens a dialog with **Day** and **Night** checkboxes
+  - Selecting only **Day** hides every strip whose midpoint falls in Earth's shadow; selecting only **Night** does the inverse
+  - The filtered view updates both the results table and the map simultaneously
+
+- **Greedy Auto-Select**
+  - The **Auto-select** button runs a greedy coverage algorithm over the current results to pick the minimal useful subset of observation strips
+  - Three objectives are available:
+
+    | Objective | Behaviour |
+    |---|---|
+    | **Max coverage** | Greedy set-cover: repeatedly picks the strip that adds the most new grid points to the covered area until no uncovered points remain. |
+    | **Min time** | Picks strips in order of highest coverage-per-second ratio, minimising total cumulative observation time while still growing coverage at each step. |
+    | **Min strips** | Like max coverage, but stops as soon as the marginal gain of the next-best strip drops below 1 % of the planning-area grid (fewest strips for near-complete coverage). |
+
+  - The algorithm samples the planning area on a 25 × 25 grid and uses ray-casting to test which grid points each strip polygon covers
+  - After auto-select runs, the table checkboxes reflect the chosen subset and the map redraws to show only those strips
+
+- **Interactive Map**
+  - Click anywhere on the map after a planning run to inspect the scan strips at that location
+  - **Single strip** — a panel slides in from the right edge showing satellite name, sensor name, resolution, start time, and stop time (UTC)
+  - **Overlapping strips** — the panel lists all strips covering the clicked point; the first is selected automatically and clicking any item switches the active selection
+  - The selected strip is highlighted on the map (bold red outline, stronger fill) and its corresponding row in the results table is highlighted and scrolled into view
+  - Click the × button or an empty map area to dismiss the panel
+  - The twilight line (day/night terminator) is rendered on the map and replayed alongside the planning timeline, making it easy to judge illumination conditions at each scheduled pass
+
 ## Database Schema
 
 The system tracks:
