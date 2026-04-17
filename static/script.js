@@ -19,6 +19,16 @@ function resolveGoApiBase() {
     return '/api/v1';
 }
 
+function shouldUseGoPlannerFallback() {
+    const { protocol, hostname } = window.location;
+
+    if (protocol === 'file:') {
+        return true;
+    }
+
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+}
+
 function getPlannerApiConfigs() {
     const configs = [];
     const seen = new Set();
@@ -30,19 +40,28 @@ function getPlannerApiConfigs() {
         }
     };
 
-    pushConfig({
-        kind: 'worker',
-        base: '/api',
-        treePath: '/satellites',
-        refreshPath: '/tle/refresh'
-    });
-
-    pushConfig({
+    const goConfig = {
         kind: 'go',
         base: resolveGoApiBase(),
         treePath: '/sat/tree',
         refreshPath: '/tle/auto-update'
-    });
+    };
+
+    const workerConfig = {
+        kind: 'worker',
+        base: '/api',
+        treePath: '/satellites',
+        refreshPath: '/tle/refresh'
+    };
+
+    if (shouldUseGoPlannerFallback()) {
+        // Local / file:// — Go backend only, skip worker API (it doesn't exist locally)
+        pushConfig(goConfig);
+    } else {
+        // Production — worker first, Go API as fallback
+        pushConfig(workerConfig);
+        pushConfig(goConfig);
+    }
 
     return configs;
 }
@@ -84,7 +103,9 @@ function normalizeTreeData(node) {
     }
 
     if (Array.isArray(normalized.children)) {
-        normalized.children = normalized.children.map(child => normalizeTreeData(child));
+        normalized.children = normalized.children
+            .map(child => normalizeTreeData(child))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
     return normalized;
@@ -214,6 +235,10 @@ let planningDays = 3;
 let planningArea = null;
 let availableBaseMaps = ['osm', 'google', 'googleSatellite', 'bing', 'bingSatellite'];
 let activeBaseMapKey = 'osm';
+let allPlanningRegions = [];
+let allPlanningSensors = [];
+let currentTableRegions = [];
+// (side panel replaces popup overlay)
 
 const BASE_MAP_DEFINITIONS = {
     osm: {
@@ -484,6 +509,48 @@ function initMap() {
         if (tableLabel) {
             tableLabel.textContent = coordText;
         }
+    });
+
+    // Close button for side panel
+    document.getElementById('stripPanelClose').addEventListener('click', function() {
+        hideStripPanel();
+    });
+
+    // Click handler: collect ALL scan strips at clicked pixel
+    map.on('click', function(evt) {
+        if (!isResultsTableVisible()) return;
+
+        const foundRegions = [];
+        map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+            const regionData = feature.get('regionData');
+            if (regionData) foundRegions.push(regionData);
+        }, { layerFilter: layer => layer === vectorLayer });
+
+        if (foundRegions.length > 0) {
+            showStripPanel(foundRegions);
+        } else {
+            hideStripPanel();
+        }
+    });
+
+    // Change cursor when hovering over a scan strip
+    map.on('pointermove', function(evt) {
+        if (!isResultsTableVisible()) {
+            map.getTargetElement().style.cursor = '';
+            return;
+        }
+        const hit = map.hasFeatureAtPixel(evt.pixel, {
+            layerFilter: layer => layer === vectorLayer,
+            hitTolerance: 2
+        });
+        // Only show pointer if the feature under cursor has regionData
+        let hasStrip = false;
+        if (hit) {
+            map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+                if (feature.get('regionData')) { hasStrip = true; return true; }
+            }, { layerFilter: layer => layer === vectorLayer });
+        }
+        map.getTargetElement().style.cursor = hasStrip ? 'pointer' : '';
     });
 
     updateSolarOverlay();
@@ -759,6 +826,36 @@ function initControls() {
     const exportBtn = document.getElementById('exportBtn');
     exportBtn.addEventListener('click', exportToPDF);
 
+    // Filter button
+    const filterBtn = document.getElementById('filterBtn');
+    filterBtn.addEventListener('click', openFilterDialog);
+
+    // Filter dialog buttons
+    document.getElementById('filterCancelBtn').addEventListener('click', closeFilterDialog);
+    document.getElementById('filterConfirmBtn').addEventListener('click', applyFilter);
+
+    // Close filter dialog when clicking the overlay background
+    document.getElementById('filterDialog').addEventListener('click', function(e) {
+        if (e.target === this) closeFilterDialog();
+    });
+
+    // Auto-select button
+    const autoSelectBtn = document.getElementById('autoSelectBtn');
+    autoSelectBtn.addEventListener('click', openAutoSelectDialog);
+
+    // Auto-select dialog buttons
+    document.getElementById('autoSelectCancelBtn').addEventListener('click', closeAutoSelectDialog);
+    document.getElementById('autoSelectConfirmBtn').addEventListener('click', function() {
+        const constraint = document.getElementById('autoSelectConstraint').value;
+        closeAutoSelectDialog();
+        greedyAutoSelect(constraint);
+    });
+
+    // Close auto-select dialog when clicking the overlay background
+    document.getElementById('autoSelectDialog').addEventListener('click', function(e) {
+        if (e.target === this) closeAutoSelectDialog();
+    });
+
     // TLE refresh is now automatic during planning
 }
 
@@ -855,7 +952,8 @@ async function ensureTLEFreshForPlanning(planningStartMs) {
 
     const isStaleForPlan = planTime - lastSync > TLE_CACHE_MAX_AGE_MS;
     if (isStaleForPlan) {
-        return await refreshTLEData({ notifyOnError: true, showStatus: false });
+        // TLEs exist but are stale – kick off background refresh and proceed immediately
+        refreshTLEData({ notifyOnError: false, showStatus: false }).catch(() => {});
     }
 
     return true;
@@ -1485,6 +1583,10 @@ async function callSensorInRegion(area) {
         // Display regions on map
         displayRegionsOnMap(allRegions);
         
+        // Save all results globally for filtering
+        allPlanningRegions = allRegions;
+        allPlanningSensors = checkedSensors;
+
         // Display results in table
         displayResultsTable(allRegions, checkedSensors);
         
@@ -1627,6 +1729,9 @@ function formatDateTime(date) {
 
 // Display results in table
 function displayResultsTable(regions, sensors) {
+    // Hide side panel whenever the displayed strip list changes
+    hideStripPanel();
+
     const resultsContainer = document.getElementById('resultsContainer');
     const resultsTableBody = document.getElementById('resultsTableBody');
     
@@ -1637,10 +1742,18 @@ function displayResultsTable(regions, sensors) {
         // Show empty table with headers only
         resultsContainer.style.display = 'flex';
         
-        // Disable export button when no results
+        // Disable export, filter, and auto-select buttons when no results
         const exportBtn = document.getElementById('exportBtn');
         if (exportBtn) {
             exportBtn.disabled = true;
+        }
+        const filterBtn = document.getElementById('filterBtn');
+        if (filterBtn) {
+            filterBtn.disabled = true;
+        }
+        const autoSelectBtn = document.getElementById('autoSelectBtn');
+        if (autoSelectBtn) {
+            autoSelectBtn.disabled = true;
         }
         
         // Show table coordinate label
@@ -1665,6 +1778,9 @@ function displayResultsTable(regions, sensors) {
     // Sort regions by start time
     const sortedRegions = [...regions].sort((a, b) => a.startTimestamp - b.startTimestamp);
     
+    // Track the current table regions for checkbox selection
+    currentTableRegions = sortedRegions;
+
     // Add rows for each region
     sortedRegions.forEach((region, index) => {
         const sensor = sensorMap[region.sensorId];
@@ -1679,6 +1795,7 @@ function displayResultsTable(regions, sensors) {
         const resolution = sensor ? (sensor.resolution || 'N/A') : 'N/A';
         
         row.innerHTML = `
+            <td class="select-col"><input type="checkbox" class="row-select-cb" checked></td>
             <td>${region.satName}</td>
             <td>${sensorName}</td>
             <td>${resolution}</td>
@@ -1689,21 +1806,51 @@ function displayResultsTable(regions, sensors) {
         // Store region data on the row for later access
         row.dataset.regionIndex = index;
         
-        // Add click handler
-        row.addEventListener('click', function() {
+        // Checkbox click: update map, do not bubble to row click handler
+        row.querySelector('.row-select-cb').addEventListener('change', function(e) {
+            e.stopPropagation();
+            syncSelectAllCheckbox();
+            updateMapFromTableSelection();
+        });
+
+        // Add click handler (skip if click was on checkbox)
+        row.addEventListener('click', function(e) {
+            if (e.target.classList.contains('row-select-cb')) return;
             highlightRegion(region, row);
         });
         
         resultsTableBody.appendChild(row);
     });
+
+    // Wire up the select-all checkbox
+    const selectAllCb = document.getElementById('selectAllRows');
+    if (selectAllCb) {
+        // Replace to remove any old listener
+        const freshCb = selectAllCb.cloneNode(true);
+        freshCb.checked = true;
+        selectAllCb.parentNode.replaceChild(freshCb, selectAllCb);
+        freshCb.addEventListener('change', function() {
+            const allCbs = document.querySelectorAll('#resultsTableBody .row-select-cb');
+            allCbs.forEach(cb => { cb.checked = freshCb.checked; });
+            updateMapFromTableSelection();
+        });
+    }
     
     // Show the results container
     resultsContainer.style.display = 'flex';
     
-    // Enable export button
+    // Enable export, filter, and auto-select buttons
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
         exportBtn.disabled = false;
+    }
+    const filterBtn = document.getElementById('filterBtn');
+    if (filterBtn) {
+        filterBtn.disabled = allPlanningRegions.length === 0;
+    }
+    const autoSelectBtnEnable = document.getElementById('autoSelectBtn');
+    if (autoSelectBtnEnable) {
+        autoSelectBtnEnable.disabled = allPlanningRegions.length === 0;
     }
     
     // Hide the map coordinate label and show table coordinate label
@@ -1726,13 +1873,28 @@ function hideResultsTable() {
 
     // When planning results are cleared/hidden, restore real-time solar overlay.
     resetSolarOverlayToNow();
+
+    // Hide scan strip side panel
+    hideStripPanel();
     
     // Disable export button
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
         exportBtn.disabled = true;
     }
-    
+
+    // Disable filter and auto-select buttons and clear stored results
+    const filterBtn = document.getElementById('filterBtn');
+    if (filterBtn) {
+        filterBtn.disabled = true;
+    }
+    const autoSelectBtnDisable = document.getElementById('autoSelectBtn');
+    if (autoSelectBtnDisable) {
+        autoSelectBtnDisable.disabled = true;
+    }
+    allPlanningRegions = [];
+    allPlanningSensors = [];
+    currentTableRegions = [];
     // Show the map coordinate label and hide table coordinate label
     const mapCoordLabel = document.getElementById('mapCoordinateLabel');
     if (mapCoordLabel) {
@@ -1771,6 +1933,96 @@ function refreshResults() {
     
     // Re-run the sensor region calculation
     callSensorInRegion(planningArea);
+}
+
+// Show the scan strip side panel with a list of regions found at clicked location
+function showStripPanel(regions) {
+    const panel = document.getElementById('stripSidePanel');
+    const list = document.getElementById('stripPanelList');
+    const titleEl = document.getElementById('stripPanelTitle');
+    if (!panel || !list || !titleEl) return;
+
+    titleEl.textContent = regions.length > 1 ? `Strips (${regions.length})` : 'Strip Details';
+    list.innerHTML = '';
+
+    regions.forEach((region) => {
+        const sensor = allPlanningSensors.find(s => s.id === region.sensorId);
+        const sensorName = sensor ? sensor.name : String(region.sensorId);
+        const resolution = sensor ? (sensor.resolution ?? 'N/A') : 'N/A';
+        const startTime = formatDateTime(new Date(region.startTimestamp * 1000));
+        const stopTime = formatDateTime(new Date(region.endTimestamp * 1000));
+        const color = region.color || '#ffcc33';
+
+        const item = document.createElement('div');
+        item.className = 'strip-panel-item';
+        item.innerHTML = `
+            <div class="strip-panel-item-header">
+                <span class="strip-panel-swatch" style="background:${color};"></span>
+                <span class="strip-panel-name">${region.satName} / ${sensorName}</span>
+            </div>
+            <div class="strip-panel-meta">
+                Resolution: ${resolution} m<br>
+                Start: ${startTime}<br>
+                Stop: ${stopTime}
+            </div>
+        `;
+
+        item.addEventListener('click', function() {
+            selectStripInPanel(region, regions, item);
+        });
+
+        list.appendChild(item);
+    });
+
+    panel.classList.add('visible');
+
+    // Auto-select the first strip
+    const firstItem = list.querySelector('.strip-panel-item');
+    if (firstItem) {
+        selectStripInPanel(regions[0], regions, firstItem);
+    }
+}
+
+// Activate a strip in the side panel: update active state, highlight on map and table
+function selectStripInPanel(region, panelRegions, itemEl) {
+    const list = document.getElementById('stripPanelList');
+    if (list) {
+        list.querySelectorAll('.strip-panel-item').forEach(el => {
+            el.classList.remove('active');
+            const badge = el.querySelector('.strip-panel-active-badge');
+            if (badge) badge.remove();
+        });
+        itemEl.classList.add('active');
+        if (panelRegions.length > 1) {
+            const badge = document.createElement('span');
+            badge.className = 'strip-panel-active-badge';
+            badge.textContent = 'Active';
+            itemEl.querySelector('.strip-panel-item-header').appendChild(badge);
+        }
+    }
+
+    // Sync highlight to map and results table
+    const rowIndex = currentTableRegions.findIndex(r =>
+        r.satId === region.satId &&
+        r.sensorId === region.sensorId &&
+        r.startTimestamp === region.startTimestamp
+    );
+    if (rowIndex >= 0) {
+        const allRows = document.querySelectorAll('#resultsTableBody tr');
+        const matchingRow = Array.from(allRows).find(r => parseInt(r.dataset.regionIndex) === rowIndex);
+        if (matchingRow) {
+            highlightRegion(region, matchingRow);
+            matchingRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+}
+
+// Hide the scan strip side panel
+function hideStripPanel() {
+    const panel = document.getElementById('stripSidePanel');
+    if (panel) {
+        panel.classList.remove('visible');
+    }
 }
 
 // Highlight a region on both table and map
@@ -1834,6 +2086,12 @@ function exportToPDF() {
         return;
     }
 
+    const selectedRegions = getSelectedTableRegions();
+    if (selectedRegions.length === 0) {
+        console.log('No rows selected for export.');
+        return;
+    }
+
     // Get jsPDF
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -1864,14 +2122,17 @@ function exportToPDF() {
     const rows = resultsTableBody.querySelectorAll('tr');
     
     rows.forEach(row => {
+        const cb = row.querySelector('.row-select-cb');
+        if (cb && !cb.checked) return;
         const cells = row.querySelectorAll('td');
-        if (cells.length >= 5) {
+        // Skip the first cell (checkbox column); data starts at index 1
+        if (cells.length >= 6) {
             tableData.push([
-                cells[0].textContent, // Satellite
-                cells[1].textContent, // Sensor
-                cells[2].textContent, // Resolution
-                cells[3].textContent, // Start Time
-                cells[4].textContent  // Stop Time
+                cells[1].textContent, // Satellite
+                cells[2].textContent, // Sensor
+                cells[3].textContent, // Resolution
+                cells[4].textContent, // Start Time
+                cells[5].textContent  // Stop Time
             ]);
         }
     });
@@ -1924,4 +2185,265 @@ function exportToPDF() {
 
     // Save the PDF
     doc.save(filename);
+}
+
+// ── Filter feature ────────────────────────────────────────────────────────────
+
+/**
+ * Compute the solar elevation angle (degrees) for an observer at (lat, lon)
+ * at the given Date.  Positive = sun above horizon (daytime).
+ */
+function calculateSolarElevation(lat, lon, date) {
+    const sunPos = calculateSunPosition(date);
+    const latRad = lat * Math.PI / 180;
+    const lonRad = lon * Math.PI / 180;
+    const sunLatRad = sunPos.lat * Math.PI / 180;
+    const sunLonRad = sunPos.lng * Math.PI / 180;
+    const sinElev = Math.sin(latRad) * Math.sin(sunLatRad)
+        + Math.cos(latRad) * Math.cos(sunLatRad) * Math.cos(lonRad - sunLonRad);
+    return Math.asin(Math.max(-1, Math.min(1, sinElev))) * 180 / Math.PI;
+}
+
+/**
+ * Return the centroid [lon, lat] of a region's coordinate ring.
+ */
+function getRegionCentroid(region) {
+    const coords = region.coordinates;
+    if (!coords || coords.length === 0) return [0, 0];
+    let sumLon = 0, sumLat = 0;
+    for (const [lon, lat] of coords) { sumLon += lon; sumLat += lat; }
+    return [sumLon / coords.length, sumLat / coords.length];
+}
+
+/**
+ * Return true if the region's mid-pass time is daytime at the strip centre.
+ * "Daytime" = solar elevation > 0° at the centroid.
+ */
+function isRegionDaytime(region) {
+    const [lon, lat] = getRegionCentroid(region);
+    const midMs = ((region.startTimestamp + region.endTimestamp) / 2) * 1000;
+    const midDate = new Date(midMs);
+    return calculateSolarElevation(lat, lon, midDate) > 0;
+}
+
+function openFilterDialog() {
+    // Restore checkbox state from last apply (default both checked on first open)
+    const dayBox = document.getElementById('filterDay');
+    const nightBox = document.getElementById('filterNight');
+    // Keep whatever the user last set; they are already defaulted to `checked` in HTML
+    document.getElementById('filterDialog').classList.remove('hidden');
+}
+
+function closeFilterDialog() {
+    document.getElementById('filterDialog').classList.add('hidden');
+}
+
+function applyFilter() {
+    const showDay = document.getElementById('filterDay').checked;
+    const showNight = document.getElementById('filterNight').checked;
+    closeFilterDialog();
+
+    // If both selected (or both deselected), show everything
+    if (showDay && showNight) {
+        redrawRegionsOnMap(allPlanningRegions);
+        displayResultsTable(allPlanningRegions, allPlanningSensors);
+        return;
+    }
+    if (!showDay && !showNight) {
+        redrawRegionsOnMap([]);
+        displayResultsTable([], allPlanningSensors);
+        return;
+    }
+
+    const filtered = allPlanningRegions.filter(region => {
+        const daytime = isRegionDaytime(region);
+        return (daytime && showDay) || (!daytime && showNight);
+    });
+
+    redrawRegionsOnMap(filtered);
+    displayResultsTable(filtered, allPlanningSensors);
+}
+
+/**
+ * Replace region polygons on the map with the given subset, preserving
+ * the planning-area rectangle feature.
+ */
+function redrawRegionsOnMap(regions) {
+    if (!vectorSource) return;
+    // Keep the planning-area outline (the only feature without regionData)
+    const planningAreaFeature = vectorSource.getFeatures().find(f => !f.get('regionData'));
+    vectorSource.clear();
+    if (planningAreaFeature) {
+        vectorSource.addFeature(planningAreaFeature);
+    }
+    if (regions && regions.length > 0) {
+        displayRegionsOnMap(regions);
+    }
+}
+
+/**
+ * Return the subset of currentTableRegions whose row checkbox is checked.
+ */
+function getSelectedTableRegions() {
+    const checkboxes = document.querySelectorAll('#resultsTableBody .row-select-cb');
+    const selected = [];
+    checkboxes.forEach((cb, i) => {
+        if (cb.checked && currentTableRegions[i]) {
+            selected.push(currentTableRegions[i]);
+        }
+    });
+    return selected;
+}
+
+/**
+ * Redraw the map using only the currently checked rows in the results table.
+ */
+function updateMapFromTableSelection() {
+    redrawRegionsOnMap(getSelectedTableRegions());
+}
+
+/**
+ * Keep the select-all header checkbox in sync with individual row checkboxes.
+ */
+function syncSelectAllCheckbox() {
+    const allCbs = Array.from(document.querySelectorAll('#resultsTableBody .row-select-cb'));
+    const selectAllCb = document.getElementById('selectAllRows');
+    if (!selectAllCb || allCbs.length === 0) return;
+    const checkedCount = allCbs.filter(cb => cb.checked).length;
+    if (checkedCount === 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    } else if (checkedCount === allCbs.length) {
+        selectAllCb.checked = true;
+        selectAllCb.indeterminate = false;
+    } else {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = true;
+    }
+}
+
+// ── Auto-select dialog ────────────────────────────────────────────────────────
+
+function openAutoSelectDialog() {
+    document.getElementById('autoSelectDialog').classList.remove('hidden');
+}
+
+function closeAutoSelectDialog() {
+    document.getElementById('autoSelectDialog').classList.add('hidden');
+}
+
+// Point-in-polygon (ray casting)
+function pointInPolygon(point, polygon) {
+    const x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0], yi = polygon[i][1];
+        const xj = polygon[j][0], yj = polygon[j][1];
+        if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// Build a grid of sample points over the planning area and compute per-region coverage
+function computeGridCoverage(regions, area, gridSize) {
+    const points = [];
+    const dLon = (area.maxLon - area.minLon) / (gridSize - 1);
+    const dLat = (area.maxLat - area.minLat) / (gridSize - 1);
+    for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+            points.push([area.minLon + i * dLon, area.minLat + j * dLat]);
+        }
+    }
+    const regionCoveredPoints = regions.map(region => {
+        const covered = new Set();
+        if (region.coordinates && region.coordinates.length >= 3) {
+            points.forEach((pt, idx) => {
+                if (pointInPolygon(pt, region.coordinates)) covered.add(idx);
+            });
+        }
+        return covered;
+    });
+    return { points, regionCoveredPoints };
+}
+
+/**
+ * Greedy auto-select strips from the current results table.
+ * constraint: 'max-coverage' | 'min-time' | 'min-strips'
+ */
+function greedyAutoSelect(constraint) {
+    if (!planningArea || !currentTableRegions || currentTableRegions.length === 0) return;
+
+    const regions = currentTableRegions;
+    const GRID = 25;
+    const { regionCoveredPoints } = computeGridCoverage(regions, planningArea, GRID);
+    const totalPoints = GRID * GRID;
+
+    const selected = new Set();
+    const remaining = new Set(regions.map((_, i) => i));
+    const coveredPoints = new Set();
+
+    if (constraint === 'max-coverage') {
+        // Greedy set cover – pick strip with most NEW coverage; include all that contribute
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestGain = 0;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain > bestGain) { bestGain = gain; bestIdx = idx; }
+            }
+            if (bestIdx === -1 || bestGain === 0) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    } else if (constraint === 'min-time') {
+        // Greedy: at each step pick the strip with the best coverage-per-second ratio,
+        // so the cumulative observation time spent is minimized while coverage grows fast.
+        // Stop when no strip adds any new coverage.
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestRatio = -1;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain === 0) { remaining.delete(idx); continue; }
+                const dur = Math.max(1, regions[idx].endTimestamp - regions[idx].startTimestamp);
+                const ratio = gain / dur;
+                if (ratio > bestRatio) { bestRatio = ratio; bestIdx = idx; }
+            }
+            if (bestIdx === -1) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    } else if (constraint === 'min-strips') {
+        // Greedy set cover – stop when marginal gain drops below 1 % of total grid points
+        const threshold = Math.max(1, Math.floor(totalPoints * 0.01));
+        while (remaining.size > 0) {
+            let bestIdx = -1, bestGain = 0;
+            for (const idx of remaining) {
+                let gain = 0;
+                for (const pt of regionCoveredPoints[idx]) {
+                    if (!coveredPoints.has(pt)) gain++;
+                }
+                if (gain > bestGain) { bestGain = gain; bestIdx = idx; }
+            }
+            if (bestIdx === -1 || bestGain < threshold) break;
+            selected.add(bestIdx);
+            remaining.delete(bestIdx);
+            for (const pt of regionCoveredPoints[bestIdx]) coveredPoints.add(pt);
+        }
+    }
+
+    // Apply selection to table checkboxes and refresh map
+    const checkboxes = document.querySelectorAll('#resultsTableBody .row-select-cb');
+    checkboxes.forEach((cb, i) => { cb.checked = selected.has(i); });
+    syncSelectAllCheckbox();
+    updateMapFromTableSelection();
+    hideStripPanel();
 }
