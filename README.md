@@ -241,6 +241,7 @@ Additional sources can be added to the `tle_site` table.
 
 ## Architecture
 
+```
 Browser
 ├── OpenLayers map (target area selection)
 ├── WASM module (orbital mechanics, compiled from Go)
@@ -248,9 +249,10 @@ Browser
 │   ├── Coverage footprint calculation
 │   └── Pass window prediction
 └── REST client → Go HTTP Server (port 8080)
-├── /api/v1/* → API handlers (JWT auth)
-├── /        → Static file serving
-└── SQLite   → satellites, sensors, TLE data
+    ├── /api/v1/* → API handlers (JWT auth)
+    ├── /        → Static file serving
+    └── SQLite   → satellites, sensors, TLE data
+```
 
 **Why WebAssembly for orbital computation?**  
 Orbital mechanics (SGP4 propagation, coverage geometry) runs entirely 
