@@ -30,8 +30,6 @@ A production-ready mission planning tool for scheduling Earth observation satell
   - Admin panel for managing satellites, sensors, and TLE data
   - Automatic TLE updates from configured external sources
 
-
-
 - **Twilight line visualization**
    - The map can render the day-night terminator (twilight line) so operators can quickly see illumination conditions on Earth.
    - In normal browsing mode, the terminator is drawn using the current timeline position.
