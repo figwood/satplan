@@ -849,6 +849,17 @@ function initControls() {
         if (e.target === this) closeAutoSelectDialog();
     });
 
+    // Info button
+    document.getElementById('infoBtn').addEventListener('click', function() {
+        document.getElementById('infoDialog').classList.remove('hidden');
+    });
+    document.getElementById('infoCloseBtn').addEventListener('click', function() {
+        document.getElementById('infoDialog').classList.add('hidden');
+    });
+    document.getElementById('infoDialog').addEventListener('click', function(e) {
+        if (e.target === this) this.classList.add('hidden');
+    });
+
     // TLE refresh is now automatic during planning
 }
 

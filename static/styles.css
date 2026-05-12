@@ -513,6 +513,50 @@ body {
     min-width: 300px;
 }
 
+.info-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.info-btn:hover {
+    background: #2563eb;
+}
+
+.info-btn:active {
+    transform: scale(0.98);
+}
+
+.info-dialog {
+    min-width: 340px;
+}
+
+.info-dialog-content {
+    padding: 12px 0;
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.info-dialog-content a {
+    color: var(--primary-color);
+    word-break: break-all;
+    text-decoration: none;
+}
+
+.info-dialog-content a:hover {
+    text-decoration: underline;
+}
+
 .auto-select-select-wrapper {
     display: flex;
     align-items: center;
