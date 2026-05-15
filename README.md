@@ -8,6 +8,12 @@ A production-ready mission planning tool for scheduling Earth observation satell
 
 **Tech stack**: Go · WebAssembly (orbital mechanics) · OpenLayers · SQLite · Helm/Kubernetes
 
+## Terraform Deployment
+
+The [`terraform`](terraform) directory contains a minimal AWS deployment for SatPlan. It creates an ECR repository for your container image, a public EC2 instance to run the image, and a dedicated EBS volume for SQLite data persistence.
+
+Use it when you want a simple single-instance deployment without ECS or Kubernetes.
+
 ## Features
 
 - **Simple Architecture**
