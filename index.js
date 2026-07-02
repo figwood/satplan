@@ -1,6 +1,7 @@
 const DEFAULT_SAT_COLOR = '#3B82F6';
 const DEFAULT_SENSOR_COLOR = '#94A3B8';
 const TLE_REQUEST_TIMEOUT_MS = 8000;
+const SITE_ORIGIN = 'https://satplan.fogsea.cf';
 const TLE_UPDATE_URLS = [
   'https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=tle',
   'https://celestrak.org/NORAD/elements/resource.txt'
@@ -25,6 +26,42 @@ const jsonResponse = (payload, status = 200) =>
       'content-type': 'application/json; charset=utf-8'
     }
   });
+
+const textResponse = (body, contentType) =>
+  new Response(body, {
+    headers: {
+      'content-type': `${contentType}; charset=utf-8`
+    }
+  });
+
+const xmlEscape = (value) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
+const sitemapResponse = () => {
+  const siteUrl = `${SITE_ORIGIN}/`;
+  return textResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${xmlEscape(siteUrl)}</loc>
+  </url>
+</urlset>
+`, 'application/xml');
+};
+
+const robotsResponse = () =>
+  textResponse(`User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin.html
+Disallow: /api/
+
+Sitemap: ${SITE_ORIGIN}/sitemap.xml
+`, 'text/plain');
 
 const readJsonBody = async (request) => {
   try {
@@ -361,6 +398,16 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      if (url.pathname === '/sitemap.xml') {
+        return sitemapResponse();
+      }
+
+      if (url.pathname === '/robots.txt') {
+        return robotsResponse();
+      }
+    }
 
     if (url.pathname.startsWith('/api/tle')) {
       const db = env.SATPLAN_D1;
