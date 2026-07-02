@@ -57,3 +57,5 @@ data_bak
 *.sql
 .wrangler
 wrangler.local.toml
+
+terraform

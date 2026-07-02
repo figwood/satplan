@@ -288,7 +288,77 @@ const fetchTleRecords = async (db, allowedIds) => {
   return jsonRecords.concat(feedRecords);
 };
 
+const refreshTleRecordsInD1 = async (db) => {
+  const satelliteIdsResult = await db.prepare('SELECT noard_id FROM satellite WHERE noard_id IS NOT NULL').all();
+  const allowedIds =
+    (satelliteIdsResult.results || [])
+      .map((row) => normalizeNoradId(row.noard_id))
+      .filter((id) => id);
+
+  const records = await fetchTleRecords(db, allowedIds);
+
+  if (!records.length) {
+    console.warn('TLE refresh: no records fetched from external source');
+    const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
+    const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
+    const error = new Error('No TLE records were fetched from external sources');
+    error.status = 503;
+    error.details = {
+      count: 0,
+      cached: true,
+      latestTime: typeof latestTime === 'number' ? latestTime * 1000 : null
+    };
+    throw error;
+  }
+
+  const allowedIdSet = new Set(allowedIds);
+  const filteredRecords = records.filter((record) => allowedIdSet.has(normalizeNoradId(record.noradId)));
+
+  if (!filteredRecords.length) {
+    console.warn('TLE refresh: fetched records did not match any satellite in catalog');
+    const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
+    const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
+    const error = new Error('Fetched TLE records did not match any catalog satellites');
+    error.status = 503;
+    error.details = {
+      count: 0,
+      cached: true,
+      latestTime: typeof latestTime === 'number' ? latestTime * 1000 : null
+    };
+    throw error;
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const statements = filteredRecords.map((record) =>
+    db
+      .prepare('INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)')
+      .bind(record.noradId, timestamp, record.line1, record.line2)
+  );
+
+  await db.batch(statements);
+
+  return {
+    count: filteredRecords.length,
+    timestamp: timestamp * 1000
+  };
+};
+
 export default {
+  async scheduled(controller, env, ctx) {
+    const db = env.SATPLAN_D1;
+    if (!db) {
+      console.error('SATPLAN_D1 binding is missing');
+      return;
+    }
+
+    try {
+      const result = await refreshTleRecordsInD1(db);
+      console.log(`Scheduled TLE refresh complete: ${result.count} record(s)`);
+    } catch (error) {
+      console.error('Scheduled TLE refresh failed', error);
+    }
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
@@ -305,57 +375,13 @@ export default {
         }
 
         try {
-          const satelliteIdsResult = await db.prepare('SELECT noard_id FROM satellite WHERE noard_id IS NOT NULL').all();
-          const allowedIds =
-            (satelliteIdsResult.results || [])
-              .map((row) => normalizeNoradId(row.noard_id))
-              .filter((id) => id);
-
-          const records = await fetchTleRecords(db, allowedIds);
-
-          if (!records.length) {
-            // External TLE source unreachable (e.g. blocked by CelesTrak).
-            // Fall back to the most recent TLE already stored in D1 so planning can continue.
-            console.warn('TLE refresh: no records fetched from external source; returning cached D1 timestamp');
-            const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
-            const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
-            return jsonResponse({
-              count: 0,
-              cached: true,
-              timestamp: typeof latestTime === 'number' ? latestTime * 1000 : Date.now()
-            });
-          }
-
-          const allowedIdSet = new Set(allowedIds);
-          const filteredRecords = records.filter((record) => allowedIdSet.has(normalizeNoradId(record.noradId)));
-
-          if (!filteredRecords.length) {
-            console.warn('TLE refresh: fetched records did not match any satellite in catalog');
-            const cachedResult = await db.prepare('SELECT MAX(time) AS latestTime FROM tle').all();
-            const latestTime = cachedResult.results?.[0]?.latestTime ?? null;
-            return jsonResponse({
-              count: 0,
-              cached: true,
-              timestamp: typeof latestTime === 'number' ? latestTime * 1000 : Date.now()
-            });
-          }
-
-          const timestamp = Math.floor(Date.now() / 1000);
-          const statements = filteredRecords.map((record) =>
-            db
-              .prepare('INSERT INTO tle (sat_noard_id, time, line1, line2) VALUES (?, ?, ?, ?)')
-              .bind(record.noradId, timestamp, record.line1, record.line2)
-          );
-
-          await db.batch(statements);
-
-          return jsonResponse({
-            count: filteredRecords.length,
-            timestamp: timestamp * 1000
-          });
+          return jsonResponse(await refreshTleRecordsInD1(db));
         } catch (error) {
           console.error('TLE refresh error', error);
-          return jsonResponse({ error: `Failed to refresh TLE data: ${error.message}` }, 503);
+          return jsonResponse({
+            error: `Failed to refresh TLE data: ${error.message}`,
+            ...(error.details || {})
+          }, error.status || 503);
         }
       }
 

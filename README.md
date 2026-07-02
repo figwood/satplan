@@ -26,7 +26,8 @@ The SatPlan experience is now delivered as a static OpenLayers planner. The enti
 The satellite and sensor hierarchy is still defined inside the `EMBEDDED_TREE_DATA` constant in `static/script.js`, but the UI now prefers the D1-backed catalog described below before falling back to this embedded snapshot. Update or extend the `satellite` entries (NORAD IDs, colors, TLE lines) and their child `sensor` objects (resolutions, observation angles) if you need a quick override or want to test without the API.
 
 ## TLE updates, caching, and status
-- The planner automatically calls the D1-backed `/api/tle/refresh` endpoint when a planning run starts and the stored TLEs are older than eight hours relative to the planning start time.
+- Cloudflare Worker Cron runs every eight hours and refreshes the D1-backed TLE records through the same update path as `/api/tle/refresh`.
+- The planner also calls `/api/tle/refresh` when a planning run starts and the stored TLEs are older than eight hours relative to the planning start time.
 - If the automatic refresh fails, the UI console.logs the operator and continues with the latest available data.
 - TLE CRUD now lives in D1: `/api/tle` supports GET/POST/PUT/DELETE, and `/api/tle/status` returns the most recent sync timestamp.
 
@@ -88,4 +89,4 @@ The algorithm samples the planning area on a 25 × 25 grid and uses ray-casting 
 ## Deploying to Cloudflare
 1. Build or bundle your `static/` directory (including `index.html`, `script.js`, `styles.css`, and `tiles/`). The Pages preview now also runs the `functions/api/satellites.js` handler, so you can run `wrangler pages dev static --local` from the repo root to exercise the D1-backed tree while developing.
 2. Push those files to Cloudflare Pages or reference them from a Cloudflare Worker. No backend service or database is required anymore—just serve the static files over HTTPS. Make sure the `SATPLAN_D1` binding in `wrangler.toml` points at your D1 database and that the schema from `satplan.sql` is imported into that database before publishing.
-3. Ensure the `/api/tle/refresh` endpoint is reachable in production so the planner can automatically keep orbital data current.
+3. Ensure the deployed Worker includes the `[triggers]` cron configuration and that `/api/tle/refresh` is reachable in production so the planner can keep orbital data current.
