@@ -1128,17 +1128,10 @@ function applyTLERecords(node, records) {
 
 function updateTLEStatusFromCache(timestamp) {
     if (!timestamp) {
-        showTLEFeedback('Embedded snapshot is in use. Refresh to fetch live TLEs.', 'info');
         updateLastSyncLabel(null);
         return;
     }
 
-    const stale = isCacheStale(timestamp);
-    const message = stale
-        ? 'Stored TLE data is stale. Refresh when needed.'
-        : 'Stored TLE data is loaded.';
-    const severity = stale ? 'warning' : 'success';
-    showTLEFeedback(message, severity);
     updateLastSyncLabel(timestamp);
 }
 
@@ -1160,19 +1153,14 @@ function updateLastSyncLabel(timestamp) {
     }
 
     if (!timestamp) {
-        label.textContent = 'Last sync: embedded snapshot';
+        label.textContent = 'TLE updated: unavailable';
+        label.title = 'Live TLE update time is unavailable';
         return;
     }
 
-    label.textContent = `Last sync: ${formatDateTime(new Date(timestamp))} UTC`;
-}
-
-function isCacheStale(timestamp) {
-    if (!timestamp) {
-        return false;
-    }
-
-    return Date.now() - timestamp > TLE_CACHE_MAX_AGE_MS;
+    const formatted = `${formatDateTime(new Date(timestamp))} UTC`;
+    label.textContent = `TLE updated: ${formatted}`;
+    label.title = `Latest stored TLE update time: ${formatted}`;
 }
 
 // Render tree view
