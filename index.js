@@ -1,7 +1,7 @@
 const DEFAULT_SAT_COLOR = '#3B82F6';
 const DEFAULT_SENSOR_COLOR = '#94A3B8';
 const TLE_REQUEST_TIMEOUT_MS = 8000;
-const SITE_ORIGIN = 'https://satplan.fogsea.cf';
+const SITE_ORIGIN = 'https://satplan.fogsea.top';
 const TLE_UPDATE_URLS = [
   'https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=tle',
   'https://celestrak.org/NORAD/elements/resource.txt'
