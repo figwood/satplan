@@ -4,7 +4,7 @@ A production-ready mission planning tool for scheduling Earth observation satell
 
 ![alt text](planning.png)
 
-**Live demo**: https://satplan.fogsea.cf 
+**Live demo**: https://satplan.fogsea.top 
 
 **Tech stack**: Go · WebAssembly (orbital mechanics) · OpenLayers · SQLite · Helm/Kubernetes
 
